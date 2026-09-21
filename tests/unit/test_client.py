@@ -20,15 +20,27 @@ def test_table_names_render_schema_qualified_identifiers() -> None:
     assert names.qualified("documents") == "agents.af_documents"
 
 
-@pytest.mark.parametrize("schema", ["Public", "my schema", 'x"y', "", "1abc"])
+@pytest.mark.parametrize("schema", ["Public", "my schema", 'x"y', "", "1abc", "public\n", "pg_custom"])
 def test_table_names_reject_unsafe_schema(schema: str) -> None:
     with pytest.raises(ValueError):
         TableNames(schema=schema)
 
 
+def test_table_names_reject_prefix_with_trailing_newline() -> None:
+    with pytest.raises(ValueError):
+        TableNames(prefix="af_\n")
+
+
 def test_table_names_reject_prefix_that_overflows_identifier_limit() -> None:
     with pytest.raises(ValueError):
         TableNames(prefix="p" * 50)
+
+
+def test_table_names_bound_the_longest_derived_index_name() -> None:
+    names = TableNames(prefix="p" * 35)
+    assert names.index("history_messages_session_idx").as_string() == f'"{"p" * 35}history_messages_session_idx"'
+    with pytest.raises(ValueError):
+        TableNames(prefix="p" * 36)
 
 
 def test_empty_prefix_is_allowed() -> None:

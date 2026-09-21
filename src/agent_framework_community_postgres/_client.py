@@ -15,9 +15,10 @@ from psycopg_pool import AsyncConnectionPool
 
 PostgresClient: TypeAlias = AsyncConnection[Any] | AsyncConnectionPool[AsyncConnection[Any]]
 
-_SCHEMA = re.compile(r"^[a-z_][a-z0-9_]*$")
-_PREFIX = re.compile(r"^[a-z0-9_]*$")
-_LONGEST_TABLE = "history_messages"
+_SCHEMA = re.compile(r"[a-z_][a-z0-9_]*")
+_PREFIX = re.compile(r"[a-z0-9_]*")
+# The longest table or index suffix this package creates; a migration adding a longer one must update it.
+_LONGEST_IDENTIFIER = "history_messages_session_idx"
 _MAX_IDENTIFIER_BYTES = 63
 
 
@@ -66,11 +67,13 @@ class TableNames:
     prefix: str = "af_"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.schema, str) or not _SCHEMA.match(self.schema):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if not isinstance(self.schema, str) or not _SCHEMA.fullmatch(self.schema):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError("schema must be a lowercase PostgreSQL identifier (letters, digits, underscores).")
-        if not isinstance(self.prefix, str) or not _PREFIX.match(self.prefix):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if self.schema.startswith("pg_"):
+            raise ValueError("schema must not start with 'pg_'; PostgreSQL reserves that prefix for system schemas.")
+        if not isinstance(self.prefix, str) or not _PREFIX.fullmatch(self.prefix):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise ValueError("table_prefix may contain only lowercase letters, digits and underscores.")
-        for name in (self.schema, f"{self.prefix}{_LONGEST_TABLE}"):
+        for name in (self.schema, f"{self.prefix}{_LONGEST_IDENTIFIER}"):
             if len(name.encode("utf-8")) > _MAX_IDENTIFIER_BYTES:
                 raise ValueError("schema and table_prefix must keep every identifier within 63 bytes.")
 
