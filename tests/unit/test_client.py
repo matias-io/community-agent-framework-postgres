@@ -1,0 +1,89 @@
+import pytest
+from agent_framework import SecretString
+from agent_framework.exceptions import SettingNotFoundError
+from psycopg_pool import AsyncConnectionPool
+
+from agent_framework_community_postgres._client import (
+    PostgresStorageError,
+    TableNames,
+    _Client,
+    create_client,
+    optional_text,
+    require_text,
+)
+
+
+def test_table_names_render_schema_qualified_identifiers() -> None:
+    names = TableNames(schema="agents", prefix="af_")
+    assert names.table("documents").as_string() == '"agents"."af_documents"'
+    assert names.index("documents_scope_idx").as_string() == '"af_documents_scope_idx"'
+    assert names.qualified("documents") == "agents.af_documents"
+
+
+@pytest.mark.parametrize("schema", ["Public", "my schema", 'x"y', "", "1abc"])
+def test_table_names_reject_unsafe_schema(schema: str) -> None:
+    with pytest.raises(ValueError):
+        TableNames(schema=schema)
+
+
+def test_table_names_reject_prefix_that_overflows_identifier_limit() -> None:
+    with pytest.raises(ValueError):
+        TableNames(prefix="p" * 50)
+
+
+def test_empty_prefix_is_allowed() -> None:
+    assert TableNames(prefix="").table("sessions").as_string() == '"public"."sessions"'
+
+
+def test_require_and_optional_text() -> None:
+    assert require_text("abc", "x") == "abc"
+    assert optional_text(None, "x") == ""
+    for bad in ("", 3, None):
+        with pytest.raises(ValueError):
+            require_text(bad, "x")
+    with pytest.raises(ValueError):
+        optional_text("", "x")
+
+
+def test_create_client_explicit_connection_string_beats_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", "host=environment password=env-secret")
+    client = create_client(
+        "host=explicit password=explicit-secret", client=None, env_file_path=None, env_file_encoding=None
+    )
+    assert client.owned
+    assert isinstance(client.client, AsyncConnectionPool)
+    assert client.client.conninfo == "host=explicit password=explicit-secret"
+    assert client.client.closed
+
+
+def test_create_client_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", "host=environment password=env-secret")
+    client = create_client(None, client=None, env_file_path=None, env_file_encoding=None)
+    assert client.client.conninfo == "host=environment password=env-secret"
+
+
+def test_create_client_requires_exactly_one_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("POSTGRES_CONNECTION_STRING", raising=False)
+    with pytest.raises(SettingNotFoundError):
+        create_client(None, client=None, env_file_path=None, env_file_encoding=None)
+    pool = AsyncConnectionPool("host=x", open=False)
+    with pytest.raises(ValueError):
+        create_client("host=y", client=pool, env_file_path=None, env_file_encoding=None)
+
+
+def test_secret_string_is_accepted_and_never_rendered() -> None:
+    client = _Client(SecretString("host=h password=hidden-value"), None)
+    assert "hidden-value" not in repr(client)
+
+
+def test_borrowed_client_must_be_psycopg_object() -> None:
+    with pytest.raises(TypeError):
+        _Client(None, object())  # type: ignore[arg-type]
+
+
+async def test_closed_client_refuses_connections() -> None:
+    client = _Client(SecretString("host=h"), None)
+    await client.close()
+    with pytest.raises(PostgresStorageError):
+        async with client.connection():
+            pass
