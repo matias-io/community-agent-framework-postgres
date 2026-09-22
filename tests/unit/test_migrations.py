@@ -32,3 +32,11 @@ def test_every_identifier_fits_at_the_longest_allowed_prefix() -> None:
     text = render(TableNames(prefix=longest_ok))
     for name in re.findall(r'"([^"]+)"', text):
         assert len(name.encode("utf-8")) <= 63, name
+
+
+def test_render_wraps_each_version_in_one_transaction() -> None:
+    text = render(TableNames())
+    assert text.count("BEGIN;") == len(MIGRATIONS)
+    assert text.count("COMMIT;") == len(MIGRATIONS)
+    assert text.index("BEGIN;") > text.index("-- version 1")
+    assert text.index("COMMIT;") > text.index("INSERT INTO")

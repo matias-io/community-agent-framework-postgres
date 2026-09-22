@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+from agent_framework import SecretString
 from psycopg import sql
 
 from agent_framework_community_postgres._client import TableNames, _Client
@@ -54,4 +57,17 @@ async def test_documents_metadata_defaults_to_an_empty_object(client: _Client, n
         )
         row = await cursor.fetchone()
     assert row is not None
-    assert str(row[0]).startswith("'{}'")
+    assert str(row[0]) == "'{}'::jsonb"
+
+
+async def test_concurrent_first_runs_apply_once_and_never_raise(test_dsn: str, schema: str) -> None:
+    for round_number in range(5):
+        names = TableNames(schema=schema, prefix=f"r{round_number}_")
+        clients = [_Client(SecretString(test_dsn), None) for _ in range(4)]
+        try:
+            reports = await asyncio.gather(*(migrate(c, names) for c in clients))
+        finally:
+            for c in clients:
+                await c.close()
+        assert sorted(r.applied for r in reports) == [(), (), (), (1,)]
+        assert all(r.current == 1 for r in reports)

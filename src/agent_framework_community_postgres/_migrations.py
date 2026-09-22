@@ -132,13 +132,17 @@ def _version_table(names: TableNames) -> sql.Composed:
 
 
 def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
-    """The SQL ``migrate`` would run, as text, for review or manual application by a DBA."""
+    """The SQL ``migrate`` would run, as text, for review or manual application by a DBA.
+
+    Each version is one transaction (``BEGIN;`` ... ``COMMIT;``), as in ``migrate``.
+    """
     chosen = list(range(1, len(MIGRATIONS) + 1)) if versions is None else list(versions)
     parts: list[str] = []
     if chosen:
         parts.append(_version_table(names).as_string() + ";")
     for version in chosen:
         parts.append(f"-- version {version}")
+        parts.append("BEGIN;")
         parts.extend(statement.as_string() + ";" for statement in MIGRATIONS[version - 1](names))
         parts.append(
             sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})")  # noqa: S608
@@ -146,17 +150,16 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
             .as_string()
             + ";"
         )
+        parts.append("COMMIT;")
     return "\n".join(parts) + ("\n" if parts else "")
 
 
 async def current_version(client: _Client, names: TableNames) -> int:
     """The highest applied version, or 0 when nothing has been applied."""
     async with client.connection() as connection:
-        cursor = await connection.execute(
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = %s",
-            (names.schema, f"{names.prefix}migrations"),
-        )
-        if await cursor.fetchone() is None:
+        cursor = await connection.execute("SELECT to_regclass(%s)", (names.qualified("migrations"),))
+        found = await cursor.fetchone()
+        if found is None or found[0] is None:
             return 0
         cursor = await connection.execute(
             sql.SQL("SELECT coalesce(max(version), 0) FROM {migrations}").format(migrations=names.table("migrations"))
@@ -176,6 +179,8 @@ async def migrate(client: _Client, names: TableNames) -> MigrationReport:
     lock_key = zlib.crc32(names.qualified("migrations").encode("utf-8"))
     applied: list[int] = []
     async with client.connection() as connection:
+        # The lock also covers the CREATE TABLE IF NOT EXISTS, which races on pg_type when two processes start fresh.
+        await connection.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
         await connection.execute(_version_table(names))
     for version in await pending_versions(client, names):
         async with client.connection() as connection:
