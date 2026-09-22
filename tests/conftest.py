@@ -5,7 +5,11 @@ from collections.abc import AsyncIterator, Callable
 from uuid import uuid4
 
 import pytest
+from agent_framework import SecretString
 from psycopg import AsyncConnection, sql
+
+from agent_framework_community_postgres._client import TableNames, _Client
+from agent_framework_community_postgres._migrations import migrate
 
 if sys.platform == "win32":
 
@@ -36,3 +40,23 @@ async def schema(test_dsn: str) -> AsyncIterator[str]:
             yield name
         finally:
             await connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
+
+
+@pytest.fixture
+def names(schema: str) -> TableNames:
+    return TableNames(schema=schema, prefix="af_")
+
+
+@pytest.fixture
+async def client(test_dsn: str) -> AsyncIterator[_Client]:
+    instance = _Client(SecretString(test_dsn), None)
+    try:
+        yield instance
+    finally:
+        await instance.close()
+
+
+@pytest.fixture
+async def migrated(client: _Client, names: TableNames) -> TableNames:
+    await migrate(client, names)
+    return names
