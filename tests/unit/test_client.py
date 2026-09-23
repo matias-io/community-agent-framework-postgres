@@ -4,9 +4,9 @@ from agent_framework.exceptions import SettingNotFoundError
 from psycopg_pool import AsyncConnectionPool
 
 from agent_framework_community_postgres._client import (
+    ClientHandle,
     PostgresStorageError,
     TableNames,
-    _Client,
     create_client,
     optional_text,
     require_text,
@@ -84,17 +84,17 @@ def test_create_client_requires_exactly_one_source(monkeypatch: pytest.MonkeyPat
 
 
 def test_secret_string_is_accepted_and_never_rendered() -> None:
-    client = _Client(SecretString("host=h password=hidden-value"), None)
+    client = ClientHandle(SecretString("host=h password=hidden-value"), None)
     assert "hidden-value" not in repr(client)
 
 
 def test_borrowed_client_must_be_psycopg_object() -> None:
     with pytest.raises(TypeError):
-        _Client(None, object())  # type: ignore[arg-type]
+        ClientHandle(None, object())  # type: ignore[arg-type]
 
 
 async def test_closed_client_refuses_connections() -> None:
-    client = _Client(SecretString("host=h"), None)
+    client = ClientHandle(SecretString("host=h"), None)
     await client.close()
     with pytest.raises(PostgresStorageError):
         async with client.connection():

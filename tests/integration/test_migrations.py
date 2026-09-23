@@ -4,13 +4,13 @@ import pytest
 from agent_framework import SecretString
 from psycopg import sql
 
-from agent_framework_community_postgres._client import TableNames, _Client
+from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._migrations import current_version, migrate, pending_versions
 
 pytestmark = pytest.mark.integration
 
 
-async def test_migrate_is_idempotent_and_records_versions(client: _Client, names: TableNames) -> None:
+async def test_migrate_is_idempotent_and_records_versions(client: ClientHandle, names: TableNames) -> None:
     assert await current_version(client, names) == 0
     assert await pending_versions(client, names) == [1]
     first = await migrate(client, names)
@@ -39,7 +39,7 @@ async def test_migrate_is_idempotent_and_records_versions(client: _Client, names
     )
 
 
-async def test_prefix_and_schema_are_honoured(client: _Client, schema: str) -> None:
+async def test_prefix_and_schema_are_honoured(client: ClientHandle, schema: str) -> None:
     names = TableNames(schema=schema, prefix="x_")
     await migrate(client, names)
     async with client.connection() as connection:
@@ -47,7 +47,7 @@ async def test_prefix_and_schema_are_honoured(client: _Client, schema: str) -> N
         assert (await cursor.fetchone()) == (0,)
 
 
-async def test_documents_metadata_defaults_to_an_empty_object(client: _Client, names: TableNames) -> None:
+async def test_documents_metadata_defaults_to_an_empty_object(client: ClientHandle, names: TableNames) -> None:
     await migrate(client, names)
     async with client.connection() as connection:
         cursor = await connection.execute(
@@ -63,7 +63,7 @@ async def test_documents_metadata_defaults_to_an_empty_object(client: _Client, n
 async def test_concurrent_first_runs_apply_once_and_never_raise(test_dsn: str, schema: str) -> None:
     for round_number in range(5):
         names = TableNames(schema=schema, prefix=f"r{round_number}_")
-        clients = [_Client(SecretString(test_dsn), None) for _ in range(4)]
+        clients = [ClientHandle(SecretString(test_dsn), None) for _ in range(4)]
         try:
             reports = await asyncio.gather(*(migrate(c, names) for c in clients))
         finally:

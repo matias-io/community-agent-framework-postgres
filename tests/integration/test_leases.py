@@ -3,14 +3,14 @@ from datetime import timedelta
 
 import pytest
 
-from agent_framework_community_postgres._client import LeaseLost, LeaseUnavailable, TableNames, _Client
+from agent_framework_community_postgres._client import ClientHandle, LeaseLost, LeaseUnavailable, TableNames
 from agent_framework_community_postgres._leases import PostgresLeases
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def leases(client: _Client, migrated: TableNames) -> PostgresLeases:
+def leases(client: ClientHandle, migrated: TableNames) -> PostgresLeases:
     return PostgresLeases(application_id="tests", client=client.client, schema=migrated.schema)
 
 

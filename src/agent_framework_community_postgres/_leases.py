@@ -13,7 +13,7 @@ from psycopg import sql
 
 from ._client import LeaseLost, LeaseUnavailable, PostgresClient, require_text
 from ._retention import RetentionPolicy
-from ._store import _Store  # pyright: ignore[reportPrivateUsage]
+from ._store import BaseStore
 
 _FIRST_DELAY = 0.1
 _MAX_DELAY = 2.0
@@ -37,7 +37,7 @@ class Lease:
         await self._store._release(self)  # pyright: ignore[reportPrivateUsage]
 
 
-class PostgresLeases(_Store):
+class PostgresLeases(BaseStore):
     """Leases keyed by ``(application_id, resource)``, judged by the database clock.
 
     Acquisition is one upsert that succeeds only when the row is absent, expired, or

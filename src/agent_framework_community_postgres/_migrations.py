@@ -9,7 +9,7 @@ from typing import cast
 
 from psycopg import sql
 
-from ._client import TableNames, _Client  # pyright: ignore[reportPrivateUsage]
+from ._client import ClientHandle, TableNames
 
 Migration = Callable[[TableNames], Sequence[sql.Composable]]
 
@@ -154,7 +154,7 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
     return "\n".join(parts) + ("\n" if parts else "")
 
 
-async def current_version(client: _Client, names: TableNames) -> int:
+async def current_version(client: ClientHandle, names: TableNames) -> int:
     """The highest applied version, or 0 when nothing has been applied."""
     async with client.connection() as connection:
         cursor = await connection.execute("SELECT to_regclass(%s)", (names.qualified("migrations"),))
@@ -168,13 +168,13 @@ async def current_version(client: _Client, names: TableNames) -> int:
         return int(row[0]) if row else 0
 
 
-async def pending_versions(client: _Client, names: TableNames) -> list[int]:
+async def pending_versions(client: ClientHandle, names: TableNames) -> list[int]:
     """Versions ``migrate`` would apply now."""
     current = await current_version(client, names)
     return list(range(current + 1, len(MIGRATIONS) + 1))
 
 
-async def migrate(client: _Client, names: TableNames) -> MigrationReport:
+async def migrate(client: ClientHandle, names: TableNames) -> MigrationReport:
     """Apply every pending migration, one transaction each, serialized across processes by an advisory lock."""
     lock_key = zlib.crc32(names.qualified("migrations").encode("utf-8"))
     applied: list[int] = []

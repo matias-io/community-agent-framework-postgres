@@ -8,16 +8,16 @@ from typing import Any, Self
 from agent_framework import SecretString
 
 from ._client import (
+    ClientHandle,
     PostgresClient,
     TableNames,
-    _Client,  # pyright: ignore[reportPrivateUsage]
     create_client,
     require_text,
 )
 from ._retention import RetentionPolicy
 
 
-class _Store:  # pyright: ignore[reportUnusedClass]
+class BaseStore:
     def __init__(
         self,
         *,
@@ -32,7 +32,7 @@ class _Store:  # pyright: ignore[reportUnusedClass]
     ) -> None:
         self.application_id = require_text(application_id, "application_id")
         self._names = TableNames(schema=schema, prefix=table_prefix)
-        self._client: _Client = create_client(
+        self._client: ClientHandle = create_client(
             connection_string, client=client, env_file_path=env_file_path, env_file_encoding=env_file_encoding
         )
         self._retention = retention or RetentionPolicy()

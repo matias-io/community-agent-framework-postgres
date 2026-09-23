@@ -90,7 +90,7 @@ class TableNames:
         return f"{self.schema}.{self.prefix}{name}"
 
 
-class _Client:
+class ClientHandle:
     """Own a lazily opened pool, or borrow a caller's pool or connection without closing it."""
 
     def __init__(self, connection_string: SecretString | None, client: PostgresClient | None) -> None:
@@ -114,7 +114,7 @@ class _Client:
 
     def __repr__(self) -> str:
         kind = type(self.client).__name__
-        return f"_Client(owned={self.owned}, client={kind}, closed={self.closed})"
+        return f"ClientHandle(owned={self.owned}, client={kind}, closed={self.closed})"
 
     async def open(self) -> None:
         """Open an owned pool; a no-op for a borrowed client."""
@@ -161,12 +161,12 @@ def create_client(
     client: PostgresClient | None,
     env_file_path: str | None,
     env_file_encoding: str | None,
-) -> _Client:
+) -> ClientHandle:
     """Resolve the connection the way every store does: explicit argument, ``.env`` file, environment."""
     if client is not None:
         if connection_string is not None or env_file_path is not None or env_file_encoding is not None:
             raise ValueError("client cannot be combined with connection_string, env_file_path or env_file_encoding.")
-        return _Client(None, client)
+        return ClientHandle(None, client)
     settings = load_settings(
         PostgresSettings,
         env_prefix="POSTGRES_",
@@ -178,4 +178,4 @@ def create_client(
     resolved = settings.get("connection_string")
     if not isinstance(resolved, SecretString):
         raise TypeError("connection_string must be a string or SecretString.")
-    return _Client(resolved, None)
+    return ClientHandle(resolved, None)

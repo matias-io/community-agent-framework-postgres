@@ -8,7 +8,7 @@ import pytest
 from agent_framework import SecretString
 from psycopg import AsyncConnection, sql
 
-from agent_framework_community_postgres._client import TableNames, _Client
+from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._migrations import migrate
 
 if sys.platform == "win32":
@@ -48,8 +48,8 @@ def names(schema: str) -> TableNames:
 
 
 @pytest.fixture
-async def client(test_dsn: str) -> AsyncIterator[_Client]:
-    instance = _Client(SecretString(test_dsn), None)
+async def client(test_dsn: str) -> AsyncIterator[ClientHandle]:
+    instance = ClientHandle(SecretString(test_dsn), None)
     try:
         yield instance
     finally:
@@ -57,6 +57,6 @@ async def client(test_dsn: str) -> AsyncIterator[_Client]:
 
 
 @pytest.fixture
-async def migrated(client: _Client, names: TableNames) -> TableNames:
+async def migrated(client: ClientHandle, names: TableNames) -> TableNames:
     await migrate(client, names)
     return names
