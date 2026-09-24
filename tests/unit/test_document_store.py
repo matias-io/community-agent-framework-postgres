@@ -29,3 +29,17 @@ async def test_put_rejects_negative_expected_revision(pool: AsyncConnectionPool)
     store = PostgresDocumentStore(application_id="app", collection="threads", client=pool)
     with pytest.raises(ValueError):
         await store.put(scope="s", key="k", payload={}, expected_revision=-1)
+
+
+async def test_put_rejects_non_dict_payload_and_metadata(pool: AsyncConnectionPool) -> None:
+    store = PostgresDocumentStore(application_id="app", collection="threads", client=pool)
+    with pytest.raises(TypeError):
+        await store.put(scope="s", key="k", payload=["x"])  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        await store.put(scope="s", key="k", payload={}, metadata="x")  # type: ignore[arg-type]
+
+
+async def test_list_rejects_limit_above_the_maximum(pool: AsyncConnectionPool) -> None:
+    store = PostgresDocumentStore(application_id="app", collection="threads", client=pool)
+    with pytest.raises(ValueError):
+        await store.list(scope="s", limit=1001)

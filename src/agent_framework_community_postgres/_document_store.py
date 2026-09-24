@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+import json
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -17,6 +18,8 @@ from ._client import PostgresClient, RevisionConflict, require_text
 from ._leases import Lease, PostgresLeases
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
+
+_MAX_LIMIT = 1000
 
 
 @dataclass(frozen=True)
@@ -49,7 +52,7 @@ class PostgresDocumentStore(BaseStore):
 
     ``scope`` is the caller's authorization boundary (a user, a tenant, an anonymous
     visitor); a key alone never reads a row. ``expected_revision`` gives optimistic
-    concurrency: ``None`` upserts, ``0`` inserts only, ``n`` updates only when the
+    concurrency: ``None`` upserts, ``0`` creates only when the document is absent or purged, ``n`` updates only when the
     stored revision is ``n``. ``lease`` serializes writers across processes.
     """
 
@@ -126,6 +129,10 @@ class PostgresDocumentStore(BaseStore):
         expected_revision: int | None = None,
     ) -> int:
         """Write the document and return its new revision. ``metadata=None`` keeps the stored metadata."""
+        if not isinstance(payload, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise TypeError("payload must be a dict.")
+        if metadata is not None and not isinstance(metadata, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise TypeError("metadata must be a dict or None.")
         if expected_revision is not None and expected_revision < 0:
             raise ValueError("expected_revision must be None, 0 or a positive integer.")
         params = self._params(scope, key) | {
@@ -151,7 +158,11 @@ class PostgresDocumentStore(BaseStore):
                 "INSERT INTO {documents} (application_id, collection, scope, key, payload, metadata, expires_at)"
                 " VALUES (%(app)s, %(collection)s, %(scope)s, %(key)s, %(payload)s,"
                 " coalesce(%(metadata)s, '{{}}'::jsonb), {expires})"
-                " ON CONFLICT (application_id, collection, scope, key) DO NOTHING RETURNING revision"
+                " ON CONFLICT (application_id, collection, scope, key) DO UPDATE SET"
+                " payload = EXCLUDED.payload, metadata = coalesce(%(metadata)s, {documents}.metadata),"
+                " revision = {documents}.revision + 1, updated_at = now(),"
+                " expires_at = EXCLUDED.expires_at, purged_at = NULL"
+                " WHERE {documents}.purged_at IS NOT NULL RETURNING revision"
             ).format(documents=documents, expires=EXPIRES_AT)
         else:
             statement = sql.SQL(
@@ -180,16 +191,17 @@ class PostgresDocumentStore(BaseStore):
             return cursor.rowcount > 0
 
     async def list(
-        self, *, scope: str, limit: int = 100, before: datetime | None = None, include_purged: bool = False
+        self, *, scope: str, limit: int = 100, before: DocumentSummary | None = None, include_purged: bool = False
     ) -> builtins.list[DocumentSummary]:
         """Summaries in a scope, newest ``updated_at`` first; pass the last ``updated_at`` as ``before`` to page."""
-        if limit < 1:
-            raise ValueError("limit must be at least 1.")
+        if limit < 1 or limit > _MAX_LIMIT:
+            raise ValueError(f"limit must be between 1 and {_MAX_LIMIT}.")
         params: dict[str, Any] = {
             "app": self.application_id,
             "collection": self.collection,
             "scope": require_text(scope, "scope"),
-            "before": before,
+            "before_at": before.updated_at if before is not None else None,
+            "before_key": before.key if before is not None else None,
             "limit": limit,
             "include_purged": include_purged,
         }
@@ -199,7 +211,8 @@ class PostgresDocumentStore(BaseStore):
                     "SELECT key, metadata, revision, created_at, updated_at, expires_at, purged_at"
                     " FROM {documents}"
                     " WHERE application_id = %(app)s AND collection = %(collection)s AND scope = %(scope)s"
-                    " AND (%(before)s::timestamptz IS NULL OR updated_at < %(before)s::timestamptz)"
+                    " AND (%(before_at)s::timestamptz IS NULL"
+                    " OR (updated_at, key) < (%(before_at)s::timestamptz, %(before_key)s))"
                     " AND (%(include_purged)s OR purged_at IS NULL)"
                     " ORDER BY updated_at DESC, key DESC LIMIT %(limit)s"
                 ).format(documents=self._names.table("documents")),
@@ -212,7 +225,9 @@ class PostgresDocumentStore(BaseStore):
         self, *, scope: str, key: str, owner: str, ttl: timedelta, wait: timedelta = timedelta(0)
     ) -> AbstractAsyncContextManager[Lease]:
         """A lease named after this document; see ``PostgresLeases.acquire``."""
-        resource = f"{self.collection}/{require_text(scope, 'scope')}/{require_text(key, 'key')}"
+        resource = json.dumps(
+            [self.collection, require_text(scope, "scope"), require_text(key, "key")], separators=(",", ":")
+        )
         return self._leases.acquire(resource, owner=owner, ttl=ttl, wait=wait)
 
     async def purge(self) -> PurgeReport:
