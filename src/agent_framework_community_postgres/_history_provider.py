@@ -25,6 +25,11 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
     and session id, the same boundaries ``RedisHistoryProvider`` uses. These identifiers
     select stored history; they are not authorization. Bind them to authenticated
     context in the application.
+
+    Saves to one session are serialized by a transaction-scoped advisory lock, so
+    concurrent writers never duplicate history. When an agent runs without an explicit
+    session, MAF creates a new session id per call, so each stateless run writes a new
+    history; pass a session or set ``retention``.
     """
 
     DEFAULT_SOURCE_ID: ClassVar[str] = "postgres_history"
@@ -82,14 +87,12 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
     )
 
     def _params(self, session_id: str | None) -> dict[str, Any]:
-        if not session_id:
-            raise ValueError("session_id must be a non-empty string.")
         return {
             "app": self.application_id,
             "tenant": self.tenant_id,
             "agent": self.agent_id,
             "source": self.source_id,
-            "session": session_id,
+            "session": require_text(session_id, "session_id"),
         }
 
     async def get_messages(
@@ -114,7 +117,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
                 continue
             try:
                 messages.append(Message.from_dict(cast("dict[str, Any]", payload)))
-            except ValueError:
+            except (ValueError, TypeError, KeyError, AttributeError):
                 logger.warning("Skipping a history row that failed to deserialize.")
         return messages
 
@@ -132,6 +135,12 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             return
         history = self._names.table("history_messages")
         async with self._client.connection() as connection:
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended("
+                "concat_ws(chr(31), %(app)s::text, %(tenant)s::text, %(agent)s::text, %(source)s::text,"
+                " %(session)s::text), 0))",
+                params,
+            )
             existing = await self._read(connection, params)
             new_messages = filter_new_messages(existing, messages)
             if not new_messages:

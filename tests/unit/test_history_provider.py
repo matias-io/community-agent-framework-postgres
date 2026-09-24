@@ -1,4 +1,5 @@
 import pytest
+from agent_framework import Message
 from psycopg_pool import AsyncConnectionPool
 
 from agent_framework_community_postgres._history_provider import PostgresHistoryProvider
@@ -25,3 +26,20 @@ async def test_none_session_id_is_an_error() -> None:
     provider = PostgresHistoryProvider(application_id="app", client=_pool())
     with pytest.raises(ValueError):
         await provider.get_messages(None)
+
+
+@pytest.mark.parametrize("session_id", ["", None])
+async def test_empty_or_missing_session_id_is_rejected_everywhere(session_id: str | None) -> None:
+    provider = PostgresHistoryProvider(application_id="app", client=_pool())
+    with pytest.raises(ValueError):
+        await provider.get_messages(session_id)
+    with pytest.raises(ValueError):
+        await provider.save_messages(session_id, [Message(role="user", contents=["a"])])
+    with pytest.raises(ValueError):
+        await provider.clear(session_id)
+
+
+async def test_non_string_session_id_is_rejected() -> None:
+    provider = PostgresHistoryProvider(application_id="app", client=_pool())
+    with pytest.raises(ValueError):
+        await provider.get_messages(5)  # type: ignore[arg-type]

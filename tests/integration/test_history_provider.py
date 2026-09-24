@@ -3,6 +3,8 @@ from datetime import timedelta
 
 import pytest
 from agent_framework import Message
+from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._history_provider import PostgresHistoryProvider
@@ -31,6 +33,29 @@ async def test_replaying_the_full_transcript_does_not_duplicate(history: Postgre
     await history.save_messages("s1", first)
     await history.save_messages("s1", [*first, Message(role="user", contents=["c"])])
     assert _texts(await history.get_messages("s1")) == ["a", "b", "c"]
+
+
+async def test_concurrent_saves_to_one_session_do_not_duplicate(history: PostgresHistoryProvider) -> None:
+    turn = [Message(role="user", contents=["q"]), Message(role="assistant", contents=["a"])]
+    await asyncio.gather(*(history.save_messages("race", turn) for _ in range(4)))
+    assert _texts(await history.get_messages("race")) == ["q", "a"]
+
+
+async def test_undecodable_rows_are_skipped(
+    history: PostgresHistoryProvider, client: ClientHandle, migrated: TableNames
+) -> None:
+    await history.save_messages("s", [Message(role="user", contents=["good"])])
+    async with client.connection() as connection:
+        await connection.execute(
+            sql.SQL(
+                "INSERT INTO {history} (application_id, tenant_id, agent_id, source_id, session_id, message)"
+                " VALUES (%s, '', '', %s, %s, %s)"
+            ).format(history=migrated.table("history_messages")),
+            ["tests", history.source_id, "s", Jsonb({"type": "message", "role": "user", "contents": 5})],
+        )
+    assert _texts(await history.get_messages("s")) == ["good"]
+    await history.save_messages("s", [Message(role="user", contents=["good"]), Message(role="user", contents=["next"])])
+    assert _texts(await history.get_messages("s")) == ["good", "next"]
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:
