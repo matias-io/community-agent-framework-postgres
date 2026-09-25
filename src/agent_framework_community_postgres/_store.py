@@ -23,7 +23,7 @@ class BaseStore:
         *,
         application_id: str,
         connection_string: str | SecretString | None,
-        client: PostgresClient | None,
+        client: PostgresClient | ClientHandle | None,
         env_file_path: str | None,
         env_file_encoding: str | None,
         schema: str,

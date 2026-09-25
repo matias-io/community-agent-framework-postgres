@@ -11,7 +11,7 @@ from datetime import timedelta
 from agent_framework import SecretString
 from psycopg import sql
 
-from ._client import LeaseLost, LeaseUnavailable, PostgresClient, require_text
+from ._client import ClientHandle, LeaseLost, LeaseUnavailable, PostgresClient, require_text
 from ._retention import RetentionPolicy
 from ._store import BaseStore
 
@@ -50,7 +50,7 @@ class PostgresLeases(BaseStore):
         *,
         application_id: str,
         connection_string: str | SecretString | None = None,
-        client: PostgresClient | None = None,
+        client: PostgresClient | ClientHandle | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",

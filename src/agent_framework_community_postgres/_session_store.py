@@ -10,7 +10,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from ._client import PostgresClient
+from ._client import ClientHandle, PostgresClient
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
@@ -32,7 +32,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
         *,
         application_id: str,
         connection_string: str | SecretString | None = None,
-        client: PostgresClient | None = None,
+        client: PostgresClient | ClientHandle | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",

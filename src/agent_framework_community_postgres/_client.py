@@ -111,6 +111,7 @@ class ClientHandle:
             assert client is not None  # noqa: S101 - narrowed by the check above
             self.client = client
         self.closed = False
+        self._parent: ClientHandle | None = None
 
     def __repr__(self) -> str:
         kind = type(self.client).__name__
@@ -122,8 +123,17 @@ class ClientHandle:
         if self.owned and isinstance(self.client, AsyncConnectionPool):
             await self.client.open()
 
+    def child(self) -> ClientHandle:
+        """A borrowed handle over the same client that stops working once this handle is closed."""
+        handle = ClientHandle(None, self.client)
+        handle._parent = self
+        return handle
+
+    def _is_closed(self) -> bool:
+        return self.closed or (self._parent is not None and self._parent._is_closed())
+
     def _ensure_open(self) -> None:
-        if self.closed:
+        if self._is_closed():
             raise PostgresStorageError("The Postgres client is closed.")
 
     @asynccontextmanager
@@ -158,14 +168,20 @@ class ClientHandle:
 def create_client(
     connection_string: str | SecretString | None,
     *,
-    client: PostgresClient | None,
+    client: PostgresClient | ClientHandle | None,
     env_file_path: str | None,
     env_file_encoding: str | None,
 ) -> ClientHandle:
-    """Resolve the connection the way every store does: explicit argument, ``.env`` file, environment."""
+    """Resolve the connection the way every store does: explicit argument, ``.env`` file, environment.
+
+    A ``ClientHandle`` (how ``PostgresPersistence`` shares its pool) is borrowed as a child handle, so
+    closing the handle it came from stops this one too.
+    """
     if client is not None:
         if connection_string is not None or env_file_path is not None or env_file_encoding is not None:
             raise ValueError("client cannot be combined with connection_string, env_file_path or env_file_encoding.")
+        if isinstance(client, ClientHandle):
+            return client.child()
         return ClientHandle(None, client)
     settings = load_settings(
         PostgresSettings,

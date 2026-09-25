@@ -99,3 +99,35 @@ async def test_closed_client_refuses_connections() -> None:
     with pytest.raises(PostgresStorageError):
         async with client.connection():
             pass
+
+
+async def test_child_handle_refuses_connections_after_parent_closes() -> None:
+    parent = ClientHandle(SecretString("host=h"), None)
+    child = parent.child()
+    assert child.client is parent.client
+    assert not child.owned
+    await parent.close()
+    with pytest.raises(PostgresStorageError):
+        async with child.connection():
+            pass
+    with pytest.raises(PostgresStorageError):
+        await child.open()
+
+
+async def test_closing_a_child_leaves_the_parent_open() -> None:
+    parent = ClientHandle(SecretString("host=h"), None)
+    child = parent.child()
+    await child.close()
+    assert child.closed
+    assert not parent.closed
+    await parent.close()
+
+
+def test_create_client_borrows_a_handle_as_a_child() -> None:
+    parent = ClientHandle(SecretString("host=h"), None)
+    child = create_client(None, client=parent, env_file_path=None, env_file_encoding=None)
+    assert child is not parent
+    assert child.client is parent.client
+    assert not child.owned
+    with pytest.raises(ValueError):
+        create_client("host=h", client=parent, env_file_path=None, env_file_encoding=None)

@@ -19,12 +19,16 @@ from ._session_store import PostgresSessionStore
 if TYPE_CHECKING:
     from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
+# A store with another application id would escape the hub's purge; another client would escape its close.
+_HUB_OWNED = ("application_id", "client")
+
 
 class PostgresPersistence:
     """Own one connection pool and hand it to every store this package provides.
 
     Enter it (``async with``) or call ``open()`` to open the pool up front; otherwise the
-    pool opens on first use. Stores it creates borrow the pool and never close it.
+    pool opens on first use. Stores it creates borrow the pool and never close it, and
+    once the hub is closed they refuse to run.
     """
 
     def __init__(
@@ -75,9 +79,12 @@ class PostgresPersistence:
         return await pending_versions(self._client, self.names)
 
     def _common(self, overrides: dict[str, Any]) -> dict[str, Any]:
+        for key in _HUB_OWNED:
+            if key in overrides:
+                raise TypeError(f"{key} is set by the hub and cannot be overridden.")
         base: dict[str, Any] = {
             "application_id": self.application_id,
-            "client": self.pool,
+            "client": self._client,
             "schema": self.names.schema,
             "table_prefix": self.names.prefix,
             "retention": self.retention,
@@ -116,7 +123,7 @@ class PostgresPersistence:
         """The lease table on the shared pool."""
         return PostgresLeases(
             application_id=self.application_id,
-            client=self.pool,
+            client=self._client,
             schema=self.names.schema,
             table_prefix=self.names.prefix,
         )

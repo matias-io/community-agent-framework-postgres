@@ -11,7 +11,7 @@ from agent_framework.exceptions import WorkflowCheckpointException
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from ._client import PostgresClient, optional_text
+from ._client import ClientHandle, PostgresClient, optional_text
 from ._framework import decode_checkpoint_value, encode_checkpoint_value
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
@@ -37,7 +37,7 @@ class PostgresCheckpointStorage(BaseStore):
         scope: str | None = None,
         allowed_checkpoint_types: list[str] | None = None,
         connection_string: str | SecretString | None = None,
-        client: PostgresClient | None = None,
+        client: PostgresClient | ClientHandle | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",

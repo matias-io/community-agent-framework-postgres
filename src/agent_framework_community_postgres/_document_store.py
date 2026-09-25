@@ -14,7 +14,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from ._client import PostgresClient, RevisionConflict, require_text
+from ._client import ClientHandle, PostgresClient, RevisionConflict, require_text
 from ._leases import Lease, PostgresLeases
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
@@ -62,7 +62,7 @@ class PostgresDocumentStore(BaseStore):
         application_id: str,
         collection: str,
         connection_string: str | SecretString | None = None,
-        client: PostgresClient | None = None,
+        client: PostgresClient | ClientHandle | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",
@@ -81,7 +81,7 @@ class PostgresDocumentStore(BaseStore):
         )
         self.collection = require_text(collection, "collection")
         self._leases = PostgresLeases(
-            application_id=self.application_id, client=self._client.client, schema=schema, table_prefix=table_prefix
+            application_id=self.application_id, client=self._client, schema=schema, table_prefix=table_prefix
         )
 
     def _where_key(self) -> sql.SQL:
