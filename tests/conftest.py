@@ -8,6 +8,7 @@ import pytest
 from agent_framework import SecretString
 from psycopg import AsyncConnection, sql
 
+from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._migrations import migrate
 
@@ -60,3 +61,10 @@ async def client(test_dsn: str) -> AsyncIterator[ClientHandle]:
 async def migrated(client: ClientHandle, names: TableNames) -> TableNames:
     await migrate(client, names)
     return names
+
+
+@pytest.fixture
+async def persistence(test_dsn: str, schema: str) -> AsyncIterator[PostgresPersistence]:
+    async with PostgresPersistence(application_id="tests", connection_string=test_dsn, schema=schema) as hub:
+        await hub.migrate()
+        yield hub
