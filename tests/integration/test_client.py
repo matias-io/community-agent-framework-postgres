@@ -1,3 +1,5 @@
+import time
+
 import pytest
 from agent_framework import SecretString
 from psycopg import AsyncConnection
@@ -61,3 +63,21 @@ async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None
             assert borrowed is connection
         await client.close()
         assert not connection.closed
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    "dsn",
+    ["postgresql://postgres:wrong@127.0.0.1:5433/agent_framework", "host=127.0.0.1 port=1 dbname=x"],
+)
+async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
+    client = ClientHandle(SecretString(dsn), None)
+    try:
+        for _ in range(2):
+            started = time.monotonic()
+            with pytest.raises(PostgresStorageError):
+                async with client.connection():
+                    pass
+            assert time.monotonic() - started < 15
+    finally:
+        await client.close()

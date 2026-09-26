@@ -8,7 +8,9 @@ import sys
 from collections.abc import Sequence
 from datetime import timedelta
 
-from ._client import TableNames
+from agent_framework.exceptions import SettingNotFoundError
+
+from ._client import PostgresStorageError, TableNames
 from ._migrations import MIGRATIONS, render
 from ._persistence import PostgresPersistence
 from ._retention import RetentionPolicy
@@ -18,14 +20,16 @@ def _add_common(parser: argparse.ArgumentParser, *, suppress: bool = False) -> N
     """Add the shared options; subcommand copies suppress defaults so both positions work."""
 
     def d(value: str | None) -> str | None:
-        return argparse.SUPPRESS if suppress else value  # type: ignore[return-value]
+        return argparse.SUPPRESS if suppress else value
 
     parser.add_argument(
         "--connection-string", default=d(None), help="psycopg conninfo or URI; defaults to POSTGRES_CONNECTION_STRING"
     )
     parser.add_argument("--schema", default=d("public"))
     parser.add_argument("--table-prefix", default=d("af_"))
-    parser.add_argument("--application-id", default=d("cli"), help="required by purge; ignored by migrate and status")
+    parser.add_argument(
+        "--application-id", default=d(None), help="required by purge; migrate and status use 'cli' when omitted"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -49,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> int:
     retention = RetentionPolicy(ttl=timedelta(seconds=args.ttl), mode=args.mode) if args.command == "purge" else None
     async with PostgresPersistence(
-        application_id=args.application_id,
+        application_id=args.application_id or "cli",
         connection_string=args.connection_string,
         schema=args.schema,
         table_prefix=args.table_prefix,
@@ -76,8 +80,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "migrate" and args.print_sql:
         print(render(TableNames(schema=args.schema, prefix=args.table_prefix)), end="")
         return 0
-    if args.command == "purge" and args.application_id == "cli":
+    if args.command == "purge" and args.application_id is None:
         _parser().error("purge needs --application-id")
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
-    with asyncio.Runner(loop_factory=loop_factory) as runner:
-        return runner.run(_run(args))
+    try:
+        with asyncio.Runner(loop_factory=loop_factory) as runner:
+            return runner.run(_run(args))
+    except PostgresStorageError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+    except SettingNotFoundError:
+        print("error: set POSTGRES_CONNECTION_STRING or pass --connection-string", file=sys.stderr)
+    return 1

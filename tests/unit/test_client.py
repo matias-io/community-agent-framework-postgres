@@ -131,3 +131,16 @@ def test_create_client_borrows_a_handle_as_a_child() -> None:
     assert not child.owned
     with pytest.raises(ValueError):
         create_client("host=h", client=parent, env_file_path=None, env_file_encoding=None)
+
+
+def test_owned_pool_defaults_connect_timeout_to_ten() -> None:
+    handle = ClientHandle(SecretString("host=127.0.0.1 dbname=x"), None)
+    assert isinstance(handle.client, AsyncConnectionPool)
+    assert handle.client.kwargs["connect_timeout"] == 10
+    assert handle.client.timeout == 10.0
+
+
+def test_owned_pool_keeps_a_conninfo_connect_timeout() -> None:
+    handle = ClientHandle(SecretString("host=127.0.0.1 dbname=x connect_timeout=3"), None)
+    assert isinstance(handle.client, AsyncConnectionPool)
+    assert "connect_timeout" not in handle.client.kwargs  # the conninfo's own 3 stays in force
