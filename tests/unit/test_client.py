@@ -144,3 +144,10 @@ def test_owned_pool_keeps_a_conninfo_connect_timeout() -> None:
     handle = ClientHandle(SecretString("host=127.0.0.1 dbname=x connect_timeout=3"), None)
     assert isinstance(handle.client, AsyncConnectionPool)
     assert "connect_timeout" not in handle.client.kwargs  # the conninfo's own 3 stays in force
+
+
+def test_invalid_conninfo_is_reported_without_echoing_it() -> None:
+    with pytest.raises(PostgresStorageError) as info:
+        ClientHandle(SecretString("garbage SECRETPW"), None)
+    assert "SECRETPW" not in str(info.value)
+    assert info.value.__cause__ is None

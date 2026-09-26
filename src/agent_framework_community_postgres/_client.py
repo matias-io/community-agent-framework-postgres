@@ -21,7 +21,8 @@ _PREFIX = re.compile(r"[a-z0-9_]*")
 # The longest table or index suffix this package creates; a migration adding a longer one must update it.
 _LONGEST_IDENTIFIER = "history_messages_session_idx"
 _MAX_IDENTIFIER_BYTES = 63
-# Bounds the connection attempt, the pool's wait for a connection, and the first open().
+# Bounds one connection attempt and how long a caller waits for a pooled connection. The pool
+# keeps retrying in the background, so a call fails fast and a later call recovers with the database.
 _CONNECT_TIMEOUT_SECONDS = 10
 
 
@@ -107,8 +108,13 @@ class ClientHandle:
             conninfo = connection_string.get_secret_value()
             if not conninfo.strip():
                 raise ValueError("connection_string must not be empty.")
+            try:
+                options = conninfo_to_dict(conninfo)
+            except Error:
+                # from None: libpq's text can quote a token next to the password.
+                raise PostgresStorageError("Invalid connection string.") from None
             kwargs: dict[str, Any] = {"autocommit": True}
-            if "connect_timeout" not in conninfo_to_dict(conninfo):
+            if "connect_timeout" not in options:
                 kwargs["connect_timeout"] = _CONNECT_TIMEOUT_SECONDS
             self.client = AsyncConnectionPool(
                 conninfo,
@@ -121,7 +127,6 @@ class ClientHandle:
         else:
             assert client is not None  # noqa: S101 - narrowed by the check above
             self.client = client
-        self._opened = False
         self.closed = False
         self._parent: ClientHandle | None = None
 
@@ -132,21 +137,6 @@ class ClientHandle:
             "the driver's reason is logged by psycopg_pool."
         )
 
-    async def _open_owned(self) -> None:
-        """Open the owned pool once, waiting at most the connect budget.
-
-        On a timeout the pool stays open and keeps retrying in the background, so later calls
-        recover on their own once the database is back; this call raises instead of hanging.
-        """
-        if self._opened or not (self.owned and isinstance(self.client, AsyncConnectionPool)):
-            return
-        try:
-            await self.client.open(wait=True, timeout=_CONNECT_TIMEOUT_SECONDS)
-        except PoolTimeout as exc:
-            self._opened = True
-            raise self._unreachable() from exc
-        self._opened = True
-
     def __repr__(self) -> str:
         kind = type(self.client).__name__
         return f"ClientHandle(owned={self.owned}, client={kind}, closed={self.closed})"
@@ -154,7 +144,8 @@ class ClientHandle:
     async def open(self) -> None:
         """Open an owned pool; a no-op for a borrowed client."""
         self._ensure_open()
-        await self._open_owned()
+        if self.owned and isinstance(self.client, AsyncConnectionPool):
+            await self.client.open()
 
     def child(self) -> ClientHandle:
         """A borrowed handle over the same client that stops working once this handle is closed."""
@@ -180,10 +171,7 @@ class ClientHandle:
         self._ensure_open()
         try:
             if isinstance(self.client, AsyncConnectionPool):
-                if self.owned:
-                    await self._open_owned()
-                else:
-                    await self.client.open()
+                await self.client.open()
                 async with self.client.connection() as connection, connection.transaction():
                     yield connection
             else:

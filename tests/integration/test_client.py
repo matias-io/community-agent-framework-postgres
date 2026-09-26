@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 import pytest
@@ -65,19 +66,49 @@ async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None
         assert not connection.closed
 
 
-@pytest.mark.timeout(30)
-@pytest.mark.parametrize(
-    "dsn",
-    ["postgresql://postgres:wrong@127.0.0.1:5433/agent_framework", "host=127.0.0.1 port=1 dbname=x"],
-)
+_UNREACHABLE = [
+    "postgresql://postgres:wrong@127.0.0.1:5433/agent_framework",
+    "host=127.0.0.1 port=1 dbname=x",
+]
+_CLEAR = "Could not connect to PostgreSQL within 10 seconds"
+
+
+async def _fail_once(handle: ClientHandle) -> None:
+    started = time.monotonic()
+    with pytest.raises(PostgresStorageError) as info:
+        async with handle.connection():
+            pass
+    assert str(info.value).startswith(_CLEAR)
+    assert time.monotonic() - started < 15
+
+
+@pytest.mark.timeout(40)
+@pytest.mark.parametrize("dsn", _UNREACHABLE)
 async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
     client = ClientHandle(SecretString(dsn), None)
     try:
-        for _ in range(2):
-            started = time.monotonic()
-            with pytest.raises(PostgresStorageError):
-                async with client.connection():
-                    pass
-            assert time.monotonic() - started < 15
+        await _fail_once(client)
+        await _fail_once(client)
+        assert isinstance(client.client, AsyncConnectionPool)
+        assert not client.client.closed
+    finally:
+        await client.close()
+
+
+@pytest.mark.timeout(40)
+async def test_concurrent_first_calls_both_fail_cleanly() -> None:
+    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    try:
+        results = await asyncio.gather(_fail_once(client), _fail_once(client), return_exceptions=True)
+        assert results == [None, None]
+    finally:
+        await client.close()
+
+
+@pytest.mark.timeout(40)
+async def test_child_of_an_unreachable_owned_handle_gets_the_clear_message() -> None:
+    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    try:
+        await _fail_once(client.child())
     finally:
         await client.close()
