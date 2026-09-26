@@ -77,6 +77,7 @@ ignore = ["D100", "D104", "D105", "D107", "D203", "D213"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "S", "RUF"]
 "samples/**" = ["D", "T20", "S"]
+"src/agent_framework_community_postgres/_cli.py" = ["T20"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
