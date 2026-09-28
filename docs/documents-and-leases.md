@@ -14,7 +14,7 @@
 | `expires_at` | `timestamptz` | Set when retention is on |
 | `purged_at` | `timestamptz` | Set by a tombstone purge |
 
-`af_leases` holds `application_id`, `resource`, `owner` and `expires_at`, keyed by `(application_id, resource)`.
+`af_leases` holds `application_id`, `resource`, `owner`, `token` and `expires_at`, keyed by `(application_id, resource)`. `token` is new on every acquisition.
 
 ## Constructor
 
@@ -47,9 +47,10 @@ PostgresDocumentStore(*, application_id, collection, ...)
 `lease(*, scope, key, owner, ttl, wait=timedelta(0))` is an async context manager that holds a lease named after the document. The resource name is the JSON array `[collection, scope, key]`. The lease is released when the block exits.
 
 - The database clock decides expiry, so clock drift between processes does not matter.
-- The same `owner` can take a lease it already holds.
-- With `wait=0`, a lease held by another owner raises `LeaseUnavailable` at once. With a longer `wait`, the store retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
-- `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another owner took it.
+- A lease has one holder per acquisition. While it is held, every other acquisition waits or fails, including one with the same `owner`. `owner` is a label for diagnostics, and `renew` and `release` match the acquisition's own `token`.
+- A holder that crashed without releasing is recovered by expiry: once its `ttl` has passed, the next acquisition takes the lease.
+- With `wait=0`, a lease that is held raises `LeaseUnavailable` at once. With a longer `wait`, the store retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
+- `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another acquisition took it.
 - Leases use plain rows, not advisory locks, so they work behind a transaction-mode pooler and never hold a connection during your work.
 - Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
 

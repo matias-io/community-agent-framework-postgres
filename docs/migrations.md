@@ -66,7 +66,7 @@ CREATE INDEX "af_checkpoints_workflow_idx" ON "public"."af_checkpoints" (applica
 CREATE TABLE "public"."af_thread_snapshots" ( application_id text NOT NULL, scope text NOT NULL, thread_id text NOT NULL, messages jsonb, state jsonb, interrupt jsonb, session_state jsonb, revision bigint NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz, purged_at timestamptz, PRIMARY KEY (application_id, scope, thread_id));
 CREATE TABLE "public"."af_documents" ( application_id text NOT NULL, collection text NOT NULL, scope text NOT NULL, key text NOT NULL, payload jsonb, metadata jsonb NOT NULL DEFAULT '{}'::jsonb, revision bigint NOT NULL DEFAULT 1, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz, purged_at timestamptz, PRIMARY KEY (application_id, collection, scope, key));
 CREATE INDEX "af_documents_scope_idx" ON "public"."af_documents" (application_id, collection, scope, updated_at DESC);
-CREATE TABLE "public"."af_leases" ( application_id text NOT NULL, resource text NOT NULL, owner text NOT NULL, expires_at timestamptz NOT NULL, PRIMARY KEY (application_id, resource));
+CREATE TABLE "public"."af_leases" ( application_id text NOT NULL, resource text NOT NULL, owner text NOT NULL, token text NOT NULL, expires_at timestamptz NOT NULL, PRIMARY KEY (application_id, resource));
 INSERT INTO "public"."af_migrations" (version) VALUES (1);
 COMMIT;
 ```

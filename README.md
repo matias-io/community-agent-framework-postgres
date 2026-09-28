@@ -205,7 +205,7 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 | `af_checkpoints` | `application_id, scope, checkpoint_id` | The encoded `WorkflowCheckpoint` |
 | `af_thread_snapshots` | `application_id, scope, thread_id` | The latest AG-UI thread snapshot |
 | `af_documents` | `application_id, collection, scope, key` | Payload, metadata and revision |
-| `af_leases` | `application_id, resource` | Lease owner and expiry |
+| `af_leases` | `application_id, resource` | Lease owner, token and expiry |
 | `af_migrations` | `version` | Applied migration versions |
 
 ## Retention

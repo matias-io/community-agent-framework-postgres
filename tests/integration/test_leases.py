@@ -28,9 +28,40 @@ async def test_second_owner_is_refused_without_waiting(leases: PostgresLeases) -
                 pass
 
 
-async def test_same_owner_can_reacquire(leases: PostgresLeases) -> None:
+async def test_same_owner_cannot_acquire_a_held_lease_again(leases: PostgresLeases) -> None:
     async with leases.acquire("threads/c", owner="one", ttl=timedelta(seconds=30)):
-        assert await leases.try_acquire("threads/c", owner="one", ttl=timedelta(seconds=30)) is not None
+        assert await leases.try_acquire("threads/c", owner="one", ttl=timedelta(seconds=30)) is None
+        with pytest.raises(LeaseUnavailable):
+            async with leases.acquire("threads/c", owner="one", ttl=timedelta(seconds=30), wait=timedelta(0)):
+                pass
+
+
+async def test_one_holder_per_acquisition_even_with_one_owner(leases: PostgresLeases) -> None:
+    ttl = timedelta(seconds=30)
+    a = await leases.try_acquire("threads/f", owner="replica-1", ttl=ttl)
+    assert a is not None
+    assert await leases.try_acquire("threads/f", owner="replica-1", ttl=ttl) is None  # B, same owner, is refused
+    await a.release()
+    b = await leases.try_acquire("threads/f", owner="replica-1", ttl=ttl)
+    assert b is not None and b.token != a.token
+    assert await leases.try_acquire("threads/f", owner="replica-2", ttl=ttl) is None
+    await a.release()  # A's stale release must not free B's lease
+    assert await leases.try_acquire("threads/f", owner="replica-2", ttl=ttl) is None
+    await b.renew()
+    with pytest.raises(LeaseLost):
+        await a.renew()
+    await b.release()
+
+
+async def test_a_crashed_holder_is_taken_over_after_expiry(leases: PostgresLeases) -> None:
+    crashed = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=1))
+    assert crashed is not None
+    assert await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30)) is None
+    await asyncio.sleep(1.5)
+    recovered = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30))
+    assert recovered is not None
+    await recovered.renew()
+    await recovered.release()
 
 
 async def test_expired_lease_is_taken_over_and_old_holder_learns_on_renew(leases: PostgresLeases) -> None:

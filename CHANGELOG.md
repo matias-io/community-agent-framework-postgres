@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `PostgresCheckpointStorage`, a workflow `CheckpointStorage` with MAF's checkpoint encoding and an optional `scope`.
 - `PostgresAGUIThreadSnapshotStore`, an `AGUIThreadSnapshotStore` for AG-UI, behind the `ag-ui` extra.
 - `PostgresDocumentStore`, JSON documents with revisions, optimistic concurrency and keyset paging.
-- `PostgresLeases`, renewable owner-tagged leases judged by the database clock.
+- `PostgresLeases`, renewable leases judged by the database clock. Each acquisition gets its own token, so a lease has one holder at a time even when two holders share an `owner`, and a crashed holder is recovered by expiry.
 - `PostgresPersistence`, a hub that shares one connection pool across every store and runs migrations.
 - `RetentionPolicy` with tombstone and delete modes, and `purge()` on every store and on the hub.
 - Numbered schema migrations through `migrate()`, serialized across processes by an advisory lock.

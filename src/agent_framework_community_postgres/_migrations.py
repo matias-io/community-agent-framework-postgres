@@ -106,6 +106,7 @@ def _v1(names: TableNames) -> list[sql.Composable]:
             " application_id text NOT NULL,"
             " resource text NOT NULL,"
             " owner text NOT NULL,"
+            " token text NOT NULL,"
             " expires_at timestamptz NOT NULL,"
             " PRIMARY KEY (application_id, resource))"
         ).format(leases=t("leases")),
