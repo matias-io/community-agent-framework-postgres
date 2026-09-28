@@ -17,7 +17,13 @@ A `ttl` of zero or less, or another `mode`, raises `ValueError`. Pass the policy
 
 ## What a write does
 
-Each write sets `expires_at` to the database's `now()` plus `ttl`. Expiry therefore counts from the last write, not from creation. Rows written while `ttl` was `None` have no `expires_at` and are never purged. Changing the policy does not touch existing rows until they are written again.
+Each write sets `expires_at` to the database's `now()` plus `ttl`. What that means depends on the table.
+
+- `af_sessions`, `af_thread_snapshots` and `af_documents` keep one row per key and rewrite it. Expiry counts from the last write to that key.
+- `af_history_messages` adds one row per message. Each message expires a TTL after it was inserted, and later messages do not extend it. An active session loses its oldest messages once they are older than the TTL.
+- `af_checkpoints` adds one row per checkpoint. Each checkpoint expires a TTL after its save, so a long-running workflow loses its oldest checkpoints first. Saving the same `checkpoint_id` again resets that row.
+
+Rows written while `ttl` was `None` have no `expires_at` and are never purged. Changing the policy does not touch existing rows until they are written again.
 
 ## What a purge does
 

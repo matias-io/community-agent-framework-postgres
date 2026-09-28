@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - Unreleased
+## [Unreleased]
 
 ### Added
 
@@ -18,7 +18,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `RetentionPolicy` with tombstone and delete modes, and `purge()` on every store and on the hub.
 - Numbered schema migrations through `migrate()`, serialized across processes by an advisory lock.
 - A CLI, `python -m agent_framework_community_postgres`, with `migrate`, `migrate --print`, `status` and `purge`.
-
-### Notes
-
 - Stores created by a hub refuse to run after the hub closes.

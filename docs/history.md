@@ -28,7 +28,7 @@ PostgresHistoryProvider(source_id="postgres_history", *, application_id, ...)
 | `application_id` | required | Top level of the row key |
 | `tenant_id` | `None` | Optional tenant in the row key. `''` raises `ValueError` |
 | `agent_id` | `None` | Optional agent in the row key. `''` raises `ValueError` |
-| `max_messages` | `None` | `None` keeps everything, `0` writes nothing, `n` keeps the newest `n` per session |
+| `max_messages` | `None` | `None` keeps everything, `0` writes nothing, `n` keeps the newest `n` per session. A negative value raises `ValueError` |
 | `load_messages`, `store_inputs`, `store_context_messages`, `store_context_from`, `store_outputs` | as in `HistoryProvider` | Passed to MAF unchanged |
 
 The connection arguments (`connection_string`, `client`, `env_file_path`, `env_file_encoding`, `schema`, `table_prefix`) and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use).
@@ -45,9 +45,40 @@ The key follows `RedisHistoryProvider`. These ids select rows. They do not autho
 - `clear(session_id)` deletes one session's rows.
 - When an agent runs without a session, MAF creates a new session id for each call, so every stateless run writes a new history. Pass a session to `agent.run`, or set retention so old histories are purged.
 
-Pass the provider to an agent in `context_providers`, as with any `HistoryProvider`.
+## Use with an agent
 
-## Example
+Pass the provider in `context_providers` and pass a session to `run`. Before each run the provider loads that session's messages, and after it the provider saves the new ones. This example needs a chat client. It uses `OpenAIChatClient` from `agent-framework-openai` with `OPENAI_API_KEY` set, but any MAF chat client works.
+
+```python
+import asyncio
+import sys
+
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatClient
+
+from agent_framework_community_postgres import PostgresPersistence
+
+DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+
+
+async def main() -> None:
+    async with PostgresPersistence(application_id="docs", connection_string=DSN) as hub:
+        await hub.migrate()
+        history = hub.history_provider(tenant_id="tenant-1", agent_id="helpdesk")
+        agent = Agent(OpenAIChatClient(model="gpt-4o"), "Answer briefly.", context_providers=[history])
+        session = agent.create_session(session_id="session-1")
+        await agent.run("My name is Ada.", session=session)
+        print((await agent.run("What is my name?", session=session)).text)
+        print(len(await history.get_messages("session-1")), "messages stored")
+
+
+with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
+    runner.run(main())
+```
+
+To continue the conversation in another process, store the `AgentSession` with `PostgresSessionStore`, or create a session with the same `session_id`.
+
+## Example without a model
 
 ```python
 import asyncio
@@ -80,4 +111,4 @@ It prints `['hi', 'hello', 'thanks']` and then `['session-1']`.
 
 ## Retention
 
-Each insert sets `expires_at` to now plus the TTL. `purge()` on the provider deletes expired rows under its application, tenant, agent and source, across all sessions. History rows are always deleted, never tombstoned. See [retention.md](retention.md).
+Each message is its own row, and its `expires_at` is set once, to its insert time plus the TTL. Later messages in the same session do not extend it. `purge()` deletes expired rows one by one, so an active session loses its oldest messages once they are older than the TTL. Choose a TTL longer than the conversations you need to keep whole. `purge()` on the provider covers its application, tenant, agent and source, across all sessions. History rows are always deleted, never tombstoned. See [retention.md](retention.md).

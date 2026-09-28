@@ -34,6 +34,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - `expected_revision=0` creates the document only when it is absent or purged. A purged row is reused and its revision continues from the old one.
 - `expected_revision=n` updates only when the stored revision is `n`.
 - A mismatch raises `RevisionConflict` and writes nothing.
+- A negative `expected_revision` raises `ValueError`.
 - `payload` must be a `dict`, and `metadata` a `dict` or `None`. Anything else raises `TypeError`.
 - `metadata=None` keeps the stored metadata. A new document gets `{}`.
 

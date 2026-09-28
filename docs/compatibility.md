@@ -35,13 +35,13 @@ Ordinary strings, integers, floats, booleans, lists and objects round-trip exact
 
 ## Windows
 
-Async psycopg cannot run on Windows' default `ProactorEventLoop`. Start your program on a selector loop with Python 3.11 or later:
+Async psycopg cannot run on Windows' default `ProactorEventLoop`. Start a script on a selector loop with Python 3.11 or later:
 
 ```python
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
     runner.run(main())
 ```
 
-Under uvicorn, choose the loop with its `--loop` option. The CLI and the samples already use a selector loop.
+Run uvicorn 0.36 or later with `--loop asyncio:SelectorEventLoop`. uvicorn imports that value as the loop factory. Its plain `--loop asyncio` picks `ProactorEventLoop` on Windows unless reload or workers are on. The CLI and the samples already use a selector loop.
 
 Use `127.0.0.1` rather than `localhost` in local connection strings. libpq tries `::1` first, and some Windows and WSL setups drop that traffic without an error.

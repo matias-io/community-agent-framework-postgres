@@ -37,4 +37,4 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
 
 def test_changelog_has_the_first_release() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## [0.1.0]" in changelog
+    assert "## [Unreleased]" in changelog or "## [0.1.0]" in changelog

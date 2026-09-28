@@ -6,8 +6,18 @@ The tests use the PostgreSQL service in `docker-compose.yml`. It listens on port
 
 ```bash
 docker compose up -d --wait
-POSTGRES_VERSION=16 POSTGRES_PORT=5434 docker compose up -d --wait  # another version or port
 ```
+
+To test against PostgreSQL 16, start it as a separate compose project. The default project's volume holds a PostgreSQL 17 data directory, which PostgreSQL 16 refuses to start on.
+
+```bash
+POSTGRES_VERSION=16 POSTGRES_PORT=5434 docker compose -p cafp-pg16 up -d --wait
+export POSTGRES_TEST_CONNECTION_STRING=postgresql://postgres:postgres@127.0.0.1:5434/agent_framework
+uv run pytest
+docker compose -p cafp-pg16 down -v
+```
+
+The last command stops it and deletes its volume.
 
 ## Run the checks
 

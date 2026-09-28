@@ -11,18 +11,20 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 ```bash
 uv add community-agent-framework-postgres
 uv add "community-agent-framework-postgres[ag-ui]"  # adds PostgresAGUIThreadSnapshotStore
+pip install community-agent-framework-postgres
+pip install "community-agent-framework-postgres[ag-ui]"
 ```
 
 The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works.
 
-On Windows, async psycopg cannot run on the default `ProactorEventLoop`. Run your entry point on a selector loop:
+On Windows, async psycopg cannot run on the default `ProactorEventLoop`. Run a script's entry point on a selector loop:
 
 ```python
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
     runner.run(main())
 ```
 
-Under uvicorn, choose the loop with its `--loop` option instead. Use `127.0.0.1` rather than `localhost` in local connection strings. libpq tries `::1` first, and some Windows and WSL setups drop that traffic without an error.
+Run uvicorn 0.36 or later with `--loop asyncio:SelectorEventLoop`. uvicorn imports that value as the loop factory. Its plain `--loop asyncio` picks `ProactorEventLoop` on Windows unless reload or workers are on. Use `127.0.0.1` rather than `localhost` in local connection strings. libpq tries `::1` first, and some Windows and WSL setups drop that traffic without an error.
 
 ## Quick start
 
@@ -55,7 +57,97 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-Every store the hub creates borrows its pool and its `application_id`, `schema`, `table_prefix` and `retention`. The factories raise `TypeError` if you pass `application_id` or `client`. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
+Every store the hub creates borrows its pool and its `application_id`. It also takes the hub's `schema`, `table_prefix` and `retention` unless you pass your own to the factory. The factories raise `TypeError` if you pass `application_id` or `client`. `hub.purge()` still covers a store with its own `retention`. It removes that store's rows whose `expires_at` has passed, in the hub's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
+
+## Use with Agent Framework
+
+Give an agent the history provider in `context_providers` and pass a session to `run`. The provider loads and saves that session's messages. This snippet needs a chat client. It uses `OpenAIChatClient` from `agent-framework-openai` with `OPENAI_API_KEY` set, but any MAF chat client works.
+
+```python
+import asyncio
+import sys
+
+from agent_framework import Agent
+from agent_framework.openai import OpenAIChatClient
+
+from agent_framework_community_postgres import PostgresPersistence
+
+DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+
+
+async def main() -> None:
+    async with PostgresPersistence(application_id="my-app", connection_string=DSN) as hub:
+        await hub.migrate()
+        agent = Agent(OpenAIChatClient(model="gpt-4o"), "Answer briefly.", context_providers=[hub.history_provider()])
+        session = agent.create_session()
+        print((await agent.run("My name is Ada.", session=session)).text)
+        print((await agent.run("What is my name?", session=session)).text)
+
+
+with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
+    runner.run(main())
+```
+
+Pass the checkpoint storage to `WorkflowBuilder`. The workflow then writes checkpoints you can resume from. [docs/checkpoints.md](docs/checkpoints.md) has the full example.
+
+```python
+import asyncio
+import sys
+
+from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
+
+from agent_framework_community_postgres import PostgresPersistence
+
+DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+
+
+class Shout(Executor):
+    @handler
+    async def run(self, text: str, ctx: WorkflowContext[str, str]) -> None:
+        await ctx.yield_output(text.upper())
+
+
+async def main() -> None:
+    async with PostgresPersistence(application_id="my-app", connection_string=DSN) as hub:
+        await hub.migrate()
+        storage = hub.checkpoint_storage(scope="conversation-1")
+        workflow = WorkflowBuilder(start_executor=Shout(id="shout"), checkpoint_storage=storage).build()
+        print((await workflow.run("hello")).get_outputs())
+        print(await storage.get_latest(workflow_name=workflow.name) is not None)
+
+
+with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
+    runner.run(main())
+```
+
+Save the `AgentSession` with `PostgresSessionStore` to continue a conversation in another process. An application loads the session at the start of a request and saves it after `agent.run` returns.
+
+```python
+import asyncio
+import sys
+
+from agent_framework import AgentSession
+
+from agent_framework_community_postgres import PostgresPersistence
+
+DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+
+
+async def main() -> None:
+    async with PostgresPersistence(application_id="my-app", connection_string=DSN) as hub:
+        await hub.migrate()
+        sessions = hub.session_store()
+        session = await sessions.get("user-1:chat-1") or AgentSession(session_id="chat-1")
+        session.state["visits"] = session.state.get("visits", 0) + 1
+        await sessions.set("user-1:chat-1", session)
+        print(session.session_id, session.state)
+
+
+with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
+    runner.run(main())
+```
+
+In an agent, create the new session with `agent.create_session(session_id=...)` instead of `AgentSession(...)`. See [docs/history.md](docs/history.md) and [docs/sessions.md](docs/sessions.md).
 
 ## Standalone use
 
@@ -63,6 +155,12 @@ Each store also works on its own. A standalone store does not migrate, so create
 
 ```bash
 POSTGRES_CONNECTION_STRING=postgresql://postgres:postgres@127.0.0.1:5433/agent_framework python -m agent_framework_community_postgres migrate
+```
+
+In PowerShell:
+
+```powershell
+$env:POSTGRES_CONNECTION_STRING = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"; python -m agent_framework_community_postgres migrate
 ```
 
 ```python
@@ -128,6 +226,7 @@ The package uses three names MAF does not export. `filter_new_messages` deduplic
 ```bash
 docker compose up -d --wait
 export POSTGRES_TEST_CONNECTION_STRING=postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
+# PowerShell: $env:POSTGRES_TEST_CONNECTION_STRING = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
