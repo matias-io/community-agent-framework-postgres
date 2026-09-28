@@ -51,7 +51,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - With `wait=0`, a lease held by another owner raises `LeaseUnavailable` at once. With a longer `wait`, the store retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
 - `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another owner took it.
 - Leases use plain rows, not advisory locks, so they work behind a transaction-mode pooler and never hold a connection during your work.
-- Pass a pool or an autocommit connection. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
+- Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
 
 `PostgresLeases` (from `hub.leases()`) offers the same leases for any resource name, through `acquire(resource, *, owner, ttl, wait)` and `try_acquire(resource, *, owner, ttl)`, which returns `None` instead of waiting.
 

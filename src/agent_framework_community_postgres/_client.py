@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import weakref
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,6 +26,9 @@ _MAX_IDENTIFIER_BYTES = 63
 # Bounds one connection attempt and how long a caller waits for a pooled connection. The pool
 # keeps retrying in the background, so a call fails fast and a later call recovers with the database.
 _CONNECT_TIMEOUT_SECONDS = 10
+# One lock per borrowed connection, shared by every handle over it: a psycopg connection runs one
+# transaction block at a time, so overlapping calls from two tasks would nest out of order.
+_CONNECTION_LOCKS: weakref.WeakKeyDictionary[AsyncConnection[Any], asyncio.Lock] = weakref.WeakKeyDictionary()
 
 
 class PostgresSettings(TypedDict, total=False):
@@ -166,7 +171,8 @@ class ClientHandle:
 
         A pool, owned or borrowed, is opened on demand (``open()`` is idempotent). A borrowed pool its
         owner already closed cannot be reopened; psycopg_pool's ``PoolClosed`` surfaces as
-        ``PostgresStorageError``.
+        ``PostgresStorageError``. A borrowed connection is held under a lock shared by every handle
+        over it, so concurrent calls on one connection are serialized.
         """
         self._ensure_open()
         try:
@@ -175,8 +181,10 @@ class ClientHandle:
                 async with self.client.connection() as connection, connection.transaction():
                     yield connection
             else:
-                # On a borrowed connection already in a transaction this becomes a savepoint.
-                async with self.client.transaction():
+                # Calls over one connection run one at a time. On a connection already inside the caller's
+                # transaction this block is a savepoint, and transaction-scoped locks last until that ends.
+                lock = _CONNECTION_LOCKS.setdefault(self.client, asyncio.Lock())
+                async with lock, self.client.transaction():
                     yield self.client
         except PoolTimeout as exc:
             raise self._unreachable() from exc

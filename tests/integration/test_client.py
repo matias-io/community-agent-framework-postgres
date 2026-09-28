@@ -3,10 +3,11 @@ import time
 
 import pytest
 from agent_framework import SecretString
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, sql
 from psycopg.errors import UndefinedTable
 from psycopg_pool import AsyncConnectionPool, PoolClosed
 
+from agent_framework_community_postgres import PostgresDocumentStore, PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, PostgresStorageError
 
 pytestmark = pytest.mark.integration
@@ -112,3 +113,20 @@ async def test_child_of_an_unreachable_owned_handle_gets_the_clear_message() -> 
         await _fail_once(client.child())
     finally:
         await client.close()
+
+
+async def test_concurrent_calls_over_one_borrowed_connection_are_serialized(test_dsn: str, schema: str) -> None:
+    async with (
+        await AsyncConnection.connect(test_dsn, autocommit=True) as connection,
+        PostgresPersistence(application_id="tests", client=connection, schema=schema) as hub,
+    ):
+        await hub.migrate()
+        separate = PostgresDocumentStore(application_id="tests", collection="threads", client=connection, schema=schema)
+        stores = [hub.document_store(collection="threads"), separate]
+        results = await asyncio.gather(
+            *(stores[n % 2].put(scope="s", key=f"k{n}", payload={"n": n}) for n in range(10))
+        )
+        assert results == [1] * 10
+    async with await AsyncConnection.connect(test_dsn, autocommit=True) as other:
+        cursor = await other.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_documents")))
+        assert await cursor.fetchone() == (10,)
