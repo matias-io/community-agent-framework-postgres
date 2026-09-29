@@ -35,3 +35,23 @@ def test_purge_with_application_id_reaches_the_connection_check(
     monkeypatch.delenv("POSTGRES_CONNECTION_STRING", raising=False)
     assert main(["purge", "--application-id", "a"]) == 1
     assert "POSTGRES_CONNECTION_STRING" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["migrate", "--print", "--schema", "Bad"],
+        ["status", "--schema", "Bad", "--connection-string", "host=127.0.0.1 port=1"],
+        ["migrate", "--print", "--table-prefix", "p" * 40],
+        ["status", "--connection-string", ""],
+    ],
+)
+def test_invalid_options_are_one_line_errors_with_exit_code_2(
+    argv: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(argv) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error:")
+    assert captured.err.count("\n") == 1
+    assert "Traceback" not in captured.err

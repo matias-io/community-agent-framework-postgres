@@ -40,7 +40,7 @@ python -m agent_framework_community_postgres migrate
 python -m agent_framework_community_postgres status
 ```
 
-`migrate` prints `applied: 1; current version: 1`, and `status` prints `current version: 1; pending: none`. `purge [--mode tombstone|delete] --application-id ID` runs `hub.purge()`. See [retention.md](retention.md). `--connection-string`, `--schema`, `--table-prefix` and `--application-id` may come before or after the subcommand. An error prints one `error:` line to stderr and exits with status 1. The connection string is never printed. When the database refuses the connection, psycopg_pool's log lines with the driver's reason come before that line.
+`migrate` prints `applied: 1; current version: 1`, and `status` prints `current version: 1; pending: none`. `purge [--mode tombstone|delete] --application-id ID` runs `hub.purge()`. See [retention.md](retention.md). `--connection-string`, `--schema`, `--table-prefix` and `--application-id` may come before or after the subcommand. An error prints one `error:` line to stderr and exits with status 1. An invalid option, such as an uppercase `--schema`, a `--table-prefix` that is too long or an empty `--connection-string`, exits with status 2, and `migrate --print` checks `--schema` and `--table-prefix` too. The connection string is never printed. When the database refuses the connection, psycopg_pool's log lines with the driver's reason come before that line.
 
 ## SQL for a DBA
 

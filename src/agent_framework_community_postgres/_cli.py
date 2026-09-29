@@ -72,17 +72,22 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point; returns the process exit code."""
+    """Entry point; returns the process exit code (2 for invalid options, 1 for other errors)."""
     args = _parser().parse_args(argv)
-    if args.command == "migrate" and args.print_sql:
-        print(render(TableNames(schema=args.schema, prefix=args.table_prefix)), end="")
-        return 0
     if args.command == "purge" and args.application_id is None:
         _parser().error("purge needs --application-id")
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
     try:
+        names = TableNames(schema=args.schema, prefix=args.table_prefix)
+        if args.command == "migrate" and args.print_sql:
+            print(render(names), end="")
+            return 0
         with asyncio.Runner(loop_factory=loop_factory) as runner:
             return runner.run(_run(args))
+    except ValueError as exc:
+        # This package's option checks (TableNames, the connection string) raise ValueError with no values in it.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     except PostgresStorageError as exc:
         print(f"error: {exc}", file=sys.stderr)
     except SettingNotFoundError:
