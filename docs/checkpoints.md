@@ -43,7 +43,7 @@ Checkpoints use the same hybrid JSON and restricted pickle encoding as MAF's `Fi
 - A timestamp without a time zone is read as UTC. A timestamp `datetime.fromisoformat` cannot parse raises `WorkflowCheckpointException`.
 - `load(checkpoint_id)` raises `WorkflowCheckpointException` when the id is absent in this scope.
 - `list_checkpoints` and `list_checkpoint_ids` return oldest first. `get_latest` returns the newest by checkpoint timestamp, then by write time.
-- `list_checkpoints` skips a row that fails to decode and logs a warning. `get_latest` and `load` raise instead.
+- `list_checkpoints`, `list_checkpoint_ids` and `get_latest` skip a row that fails to decode and log a warning without its id. `get_latest` returns the newest row that decodes. `load` raises for a row that fails to decode.
 - `delete(checkpoint_id)` returns `True` when a row existed.
 
 ## Example

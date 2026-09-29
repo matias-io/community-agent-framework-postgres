@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -6,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from agent_framework import Executor, WorkflowBuilder, WorkflowCheckpoint, WorkflowContext, handler
 from agent_framework.exceptions import WorkflowCheckpointException
+from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from agent_framework_community_postgres._checkpoint_storage import PostgresCheckpointStorage
 from agent_framework_community_postgres._client import ClientHandle, TableNames
@@ -131,6 +134,30 @@ async def test_retention_deletes_expired_checkpoints(client: ClientHandle, migra
     await asyncio.sleep(1.5)
     assert (await storage.purge()).counts == {"af_checkpoints": 1}
     assert await storage.list_checkpoints(workflow_name="wf") == []
+
+
+async def test_undecodable_rows_are_skipped_by_latest_and_ids(
+    storage: PostgresCheckpointStorage, client: ClientHandle, migrated: TableNames, caplog: pytest.LogCaptureFixture
+) -> None:
+    base = datetime(2026, 9, 30, 12, tzinfo=UTC)
+    good = _checkpoint(workflow_name="secret-workflow", timestamp=(base - timedelta(minutes=1)).isoformat())
+    await storage.save(good)
+    async with client.connection() as connection:
+        await connection.execute(
+            sql.SQL(
+                "INSERT INTO {} (application_id, scope, workflow_name, checkpoint_id, checkpoint_timestamp,"
+                " iteration_count, encoded) VALUES ('tests', '', 'secret-workflow', 'secret-bad-id', %s, 0, %s)"
+            ).format(migrated.table("checkpoints")),
+            (base, Jsonb({"not": "a checkpoint"})),
+        )
+    with caplog.at_level(logging.WARNING):
+        latest = await storage.get_latest(workflow_name="secret-workflow")
+        ids = await storage.list_checkpoint_ids(workflow_name="secret-workflow")
+    assert latest is not None and latest.checkpoint_id == good.checkpoint_id
+    assert ids == [good.checkpoint_id]
+    assert [c.checkpoint_id for c in await storage.list_checkpoints(workflow_name="secret-workflow")] == ids
+    assert caplog.records
+    assert all("secret" not in record.getMessage() for record in caplog.records)
 
 
 class _Upper(Executor):

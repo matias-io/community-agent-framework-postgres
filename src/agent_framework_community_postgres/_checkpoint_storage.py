@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -142,17 +143,17 @@ class PostgresCheckpointStorage(BaseStore):
             )
             return await cursor.fetchall()
 
+    def _decoded(self, rows: list[Any]) -> Iterator[WorkflowCheckpoint]:
+        """Decode rows in order, logging and skipping any that fail (MAF's ``FileCheckpointStorage`` does the same)."""
+        for _checkpoint_id, encoded in rows:
+            try:
+                yield self._decode(encoded)
+            except Exception:
+                logger.warning("Skipping a checkpoint row that failed to decode.")
+
     async def list_checkpoints(self, *, workflow_name: str) -> list[WorkflowCheckpoint]:
         """Checkpoints for the workflow, oldest first; rows that fail to decode are logged and skipped."""
-        checkpoints: list[WorkflowCheckpoint] = []
-        for checkpoint_id, encoded in await self._rows(workflow_name):
-            try:
-                checkpoints.append(self._decode(encoded))
-            except Exception:
-                logger.warning(
-                    "Skipping checkpoint %s of workflow %s: it failed to decode.", checkpoint_id, workflow_name
-                )
-        return checkpoints
+        return list(self._decoded(await self._rows(workflow_name)))
 
     async def delete(self, checkpoint_id: str) -> bool:
         """Delete by id within this store's scope; ``True`` when a row existed."""
@@ -167,13 +168,19 @@ class PostgresCheckpointStorage(BaseStore):
             return cursor.rowcount > 0
 
     async def get_latest(self, *, workflow_name: str) -> WorkflowCheckpoint | None:
-        """The newest checkpoint by its own timestamp, then by insertion time."""
-        rows = await self._rows(workflow_name, newest_first=True, limit=1)
-        return self._decode(rows[0][1]) if rows else None
+        """The newest checkpoint that decodes, by its own timestamp, then by insertion time."""
+        newest = await self._rows(workflow_name, newest_first=True, limit=1)
+        if not newest:
+            return None
+        found = next(self._decoded(newest), None)
+        if found is not None:
+            return found
+        # The newest row is undecodable (already logged): walk the rest, newest first.
+        return next(self._decoded((await self._rows(workflow_name, newest_first=True))[1:]), None)
 
     async def list_checkpoint_ids(self, *, workflow_name: str) -> list[str]:
-        """Checkpoint ids for the workflow, oldest first."""
-        return [checkpoint_id for checkpoint_id, _ in await self._rows(workflow_name)]
+        """Ids of the checkpoints that decode, oldest first; the others are logged and skipped."""
+        return [checkpoint.checkpoint_id for checkpoint in await self.list_checkpoints(workflow_name=workflow_name)]
 
     async def purge(self) -> PurgeReport:
         """Delete expired checkpoints in this store's scope, whatever policy stamped them (no tombstone form)."""
