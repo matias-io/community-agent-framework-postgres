@@ -1,9 +1,17 @@
 import asyncio
+import logging
 from datetime import timedelta
 
 import pytest
 
-from agent_framework_community_postgres._client import ClientHandle, LeaseLost, LeaseUnavailable, TableNames
+from agent_framework_community_postgres import PostgresPersistence
+from agent_framework_community_postgres._client import (
+    ClientHandle,
+    LeaseLost,
+    LeaseUnavailable,
+    PostgresStorageError,
+    TableNames,
+)
 from agent_framework_community_postgres._leases import PostgresLeases
 
 pytestmark = pytest.mark.integration
@@ -86,3 +94,38 @@ async def test_waiting_acquire_succeeds_once_released(leases: PostgresLeases) ->
     async with leases.acquire("threads/e", owner="two", ttl=timedelta(seconds=30), wait=timedelta(seconds=5)) as lease:
         assert lease.owner == "two"
     await task
+
+
+async def test_body_error_survives_a_failed_release(
+    persistence: PostgresPersistence, caplog: pytest.LogCaptureFixture
+) -> None:
+    leases = persistence.leases()
+    with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError, match="body failed"):
+        async with leases.acquire("threads/secret-resource", owner="one", ttl=timedelta(seconds=30)):
+            await persistence.close()
+            raise RuntimeError("body failed")
+    assert any("release" in record.getMessage() for record in caplog.records)
+    assert all("secret-resource" not in record.getMessage() for record in caplog.records)
+
+
+async def test_release_failure_surfaces_when_the_body_succeeded(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    with pytest.raises(PostgresStorageError):
+        async with leases.acquire("threads/h", owner="one", ttl=timedelta(seconds=30)):
+            await persistence.close()
+
+
+async def test_expired_lease_nobody_took_raises_lease_lost_on_renew(leases: PostgresLeases) -> None:
+    lease = await leases.try_acquire("threads/i", owner="one", ttl=timedelta(seconds=1))
+    assert lease is not None
+    await asyncio.sleep(1.5)
+    with pytest.raises(LeaseLost):
+        await lease.renew()
+
+
+async def test_lease_is_released_when_the_body_raises(leases: PostgresLeases) -> None:
+    with pytest.raises(RuntimeError):
+        async with leases.acquire("threads/j", owner="one", ttl=timedelta(seconds=30)):
+            raise RuntimeError("body failed")
+    other = await leases.try_acquire("threads/j", owner="two", ttl=timedelta(seconds=30))
+    assert other is not None

@@ -44,7 +44,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 
 ## Leases
 
-`lease(*, scope, key, owner, ttl, wait=timedelta(0))` is an async context manager that holds a lease named after the document. The resource name is the JSON array `[collection, scope, key]`. The lease is released when the block exits.
+`lease(*, scope, key, owner, ttl, wait=timedelta(0))` is an async context manager that holds a lease named after the document. The resource name is the JSON array `[collection, scope, key]`. The lease is released when the block exits. If the block raises and the release then fails, for example because the database is down, a warning is logged on the `agent_framework_community_postgres._leases` logger and the block's own exception propagates. The lease then frees itself when its `ttl` passes.
 
 - The database clock decides expiry, so clock drift between processes does not matter.
 - A lease has one holder per acquisition. While it is held, every other acquisition waits or fails, including one with the same `owner`. `owner` is a label for diagnostics, and `renew` and `release` match the acquisition's own `token`.

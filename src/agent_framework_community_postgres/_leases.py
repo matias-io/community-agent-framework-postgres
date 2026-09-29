@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -15,6 +16,8 @@ from psycopg import sql
 from ._client import ClientHandle, LeaseLost, LeaseUnavailable, PostgresClient, require_text
 from ._retention import RetentionPolicy
 from ._store import BaseStore
+
+logger = logging.getLogger(__name__)
 
 _FIRST_DELAY = 0.1
 _MAX_DELAY = 2.0
@@ -100,7 +103,11 @@ class PostgresLeases(BaseStore):
     async def acquire(
         self, resource: str, *, owner: str, ttl: timedelta, wait: timedelta = timedelta(0)
     ) -> AsyncGenerator[Lease]:
-        """Hold the lease for the block, waiting up to ``wait`` for it to free up; release on exit."""
+        """Hold the lease for the block, waiting up to ``wait`` for it to free up; release on exit.
+
+        If the block raises and the release then fails, the release failure is logged and the
+        block's exception propagates. If the block succeeded, a release failure propagates.
+        """
         deadline = time.monotonic() + wait.total_seconds()
         delay = _FIRST_DELAY
         while True:
@@ -113,8 +120,13 @@ class PostgresLeases(BaseStore):
             delay = min(delay * 2, _MAX_DELAY)
         try:
             yield lease
-        finally:
-            await lease.release()
+        except BaseException:
+            try:
+                await lease.release()
+            except Exception:
+                logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
+            raise
+        await lease.release()
 
     def _lease_params(self, lease: Lease) -> dict[str, object]:
         return {"app": self.application_id, "resource": lease.resource, "owner": lease.owner, "token": lease.token}
