@@ -36,8 +36,19 @@ def test_status_migrate_status(test_dsn: str, schema: str, capsys: pytest.Captur
 def test_purge_reports_counts(test_dsn: str, schema: str, capsys: pytest.CaptureFixture[str]) -> None:
     common = ["--connection-string", test_dsn, "--schema", schema]
     assert main(["migrate", *common]) == 0
-    assert main(["purge", "--application-id", "tests", "--ttl", "60", *common]) == 0
-    assert "af_documents: 0" in capsys.readouterr().out
+    with Connection.connect(test_dsn, autocommit=True) as connection:
+        connection.execute(
+            sql.SQL(
+                "INSERT INTO {} (application_id, collection, scope, key, payload, expires_at)"
+                " VALUES ('tests', 'c', 's', 'k', '{{}}', now() - interval '1 second')"
+            ).format(sql.Identifier(schema, "af_documents"))
+        )
+    capsys.readouterr()
+    assert main(["purge", "--application-id", "tests", *common]) == 0
+    out = capsys.readouterr().out
+    assert "af_documents: 1" in out and "total: 1" in out
+    assert main(["purge", "--application-id", "tests", "--mode", "delete", *common]) == 0
+    assert "af_documents: 1" in capsys.readouterr().out
 
 
 @pytest.mark.timeout(30)

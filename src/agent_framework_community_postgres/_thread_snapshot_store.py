@@ -133,9 +133,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
             )
 
     async def purge(self) -> PurgeReport:
-        """Apply the retention policy to expired snapshots."""
-        if not self._retention.enabled:
-            return PurgeReport()
+        """Purge expired snapshots in this store's mode, whatever policy stamped them."""
         async with self._client.connection() as connection:
             count = await purge_rows(
                 connection,

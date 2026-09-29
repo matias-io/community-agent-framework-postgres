@@ -6,14 +6,12 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
-from datetime import timedelta
 
 from agent_framework.exceptions import SettingNotFoundError
 
 from ._client import PostgresStorageError, TableNames
 from ._migrations import MIGRATIONS, render
 from ._persistence import PostgresPersistence
-from ._retention import RetentionPolicy
 
 
 def _add_common(parser: argparse.ArgumentParser, *, suppress: bool = False) -> None:
@@ -44,20 +42,19 @@ def _parser() -> argparse.ArgumentParser:
     migrate = commands.add_parser("migrate", parents=[shared], help="apply pending migrations")
     migrate.add_argument("--print", action="store_true", dest="print_sql", help="print the SQL instead of running it")
     commands.add_parser("status", parents=[shared], help="show the applied and pending versions")
-    purge = commands.add_parser("purge", parents=[shared], help="tombstone or delete rows older than --ttl seconds")
-    purge.add_argument("--ttl", type=int, required=True, help="seconds since the last write after which rows expire")
+    purge = commands.add_parser(
+        "purge", parents=[shared], help="tombstone or delete the rows whose expires_at has passed"
+    )
     purge.add_argument("--mode", choices=["tombstone", "delete"], default="tombstone")
     return parser
 
 
 async def _run(args: argparse.Namespace) -> int:
-    retention = RetentionPolicy(ttl=timedelta(seconds=args.ttl), mode=args.mode) if args.command == "purge" else None
     async with PostgresPersistence(
         application_id=args.application_id or "cli",
         connection_string=args.connection_string,
         schema=args.schema,
         table_prefix=args.table_prefix,
-        retention=retention,
     ) as persistence:
         if args.command == "migrate":
             report = await persistence.migrate()
@@ -67,7 +64,7 @@ async def _run(args: argparse.Namespace) -> int:
             current = len(MIGRATIONS) if not pending else pending[0] - 1
             print(f"current version: {current}; pending: {', '.join(map(str, pending)) or 'none'}")
         else:
-            report = await persistence.purge()
+            report = await persistence.purge(mode=args.mode)
             for table, count in sorted(report.counts.items()):
                 print(f"{table}: {count}")
             print(f"total: {report.total}")

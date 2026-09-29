@@ -13,7 +13,7 @@ from ._document_store import PostgresDocumentStore
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
 from ._migrations import MigrationReport, migrate, pending_versions
-from ._retention import PurgeReport, RetentionPolicy, purge_rows
+from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
 from ._session_store import PostgresSessionStore
 
 if TYPE_CHECKING:
@@ -128,10 +128,13 @@ class PostgresPersistence:
             table_prefix=self.names.prefix,
         )
 
-    async def purge(self) -> PurgeReport:
-        """Apply the hub's retention policy to every table of this application."""
-        if not self.retention.enabled:
-            return PurgeReport()
+    async def purge(self, mode: RetentionMode | None = None) -> PurgeReport:
+        """Purge every expired row of this application in every table.
+
+        A row is expired when its ``expires_at``, stamped by whichever policy wrote it, has
+        passed; the hub needs no policy of its own. ``mode`` defaults to the hub policy's mode.
+        """
+        chosen = RetentionPolicy(mode=mode).mode if mode is not None else self.retention.mode
         where = sql.SQL("application_id = %(app)s")
         params = {"app": self.application_id}
         plan: list[tuple[str, sql.Composable | None, bool]] = [
@@ -153,7 +156,7 @@ class PostgresPersistence:
                     table=self.names.table(table),
                     where=where,
                     params=params,
-                    mode=self.retention.mode if tombstone_allowed else "delete",
+                    mode=chosen if tombstone_allowed else "delete",
                     tombstone=tombstone,
                 )
         return PurgeReport(counts)

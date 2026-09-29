@@ -106,9 +106,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
             )
 
     async def purge(self) -> PurgeReport:
-        """Apply the retention policy to expired sessions."""
-        if not self._retention.enabled:
-            return PurgeReport()
+        """Purge expired sessions in this store's mode, whatever policy stamped them."""
         async with self._client.connection() as connection:
             count = await purge_rows(
                 connection,

@@ -200,3 +200,21 @@ async def test_concurrent_writers_with_one_revision_yield_one_winner(documents: 
     assert sum(1 for r in results if isinstance(r, RevisionConflict)) == 7
     doc = await documents.get(scope="s", key="k")
     assert doc is not None and doc.revision == 2
+
+
+async def test_store_without_a_policy_purges_rows_another_policy_stamped(
+    client: ClientHandle, migrated: TableNames, documents: PostgresDocumentStore
+) -> None:
+    stamping = PostgresDocumentStore(
+        application_id="tests",
+        collection="threads",
+        client=client.client,
+        schema=migrated.schema,
+        retention=RetentionPolicy(ttl=timedelta(seconds=1)),
+    )
+    await stamping.put(scope="s", key="old", payload={})
+    await documents.put(scope="s", key="kept", payload={})
+    await asyncio.sleep(1.5)
+    assert (await documents.purge()).counts == {"af_documents": 1}
+    assert await documents.get(scope="s", key="old") is None
+    assert await documents.get(scope="s", key="kept") is not None

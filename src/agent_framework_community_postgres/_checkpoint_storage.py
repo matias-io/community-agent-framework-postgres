@@ -175,9 +175,7 @@ class PostgresCheckpointStorage(BaseStore):
         return [checkpoint_id for checkpoint_id, _ in await self._rows(workflow_name)]
 
     async def purge(self) -> PurgeReport:
-        """Delete expired checkpoints in this store's scope (recovery data has no tombstone form)."""
-        if not self._retention.enabled:
-            return PurgeReport()
+        """Delete expired checkpoints in this store's scope, whatever policy stamped them (no tombstone form)."""
         async with self._client.connection() as connection:
             count = await purge_rows(
                 connection,

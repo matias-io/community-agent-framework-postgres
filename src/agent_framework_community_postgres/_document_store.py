@@ -231,9 +231,7 @@ class PostgresDocumentStore(BaseStore):
         return self._leases.acquire(resource, owner=owner, ttl=ttl, wait=wait)
 
     async def purge(self) -> PurgeReport:
-        """Apply the retention policy to this collection's expired rows."""
-        if not self._retention.enabled:
-            return PurgeReport()
+        """Purge this collection's expired rows in this store's mode, whatever policy stamped them."""
         async with self._client.connection() as connection:
             count = await purge_rows(
                 connection,

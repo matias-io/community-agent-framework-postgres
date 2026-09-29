@@ -193,9 +193,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             return [row[0] for row in await cursor.fetchall()]
 
     async def purge(self) -> PurgeReport:
-        """Delete expired messages under this provider's scope (history has no tombstone form)."""
-        if not self._retention.enabled:
-            return PurgeReport()
+        """Delete expired messages under this provider's scope, whatever policy stamped them (no tombstone form)."""
         async with self._client.connection() as connection:
             count = await purge_rows(
                 connection,
