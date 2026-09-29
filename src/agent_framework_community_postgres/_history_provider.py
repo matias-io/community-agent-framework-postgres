@@ -8,10 +8,10 @@ from typing import Any, ClassVar, cast
 
 from agent_framework import HistoryProvider, Message, SecretString
 from psycopg import AsyncConnection, sql
-from psycopg.types.json import Jsonb
 
 from ._client import ClientHandle, PostgresClient, optional_text, require_text
 from ._framework import filter_new_messages
+from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
@@ -134,6 +134,8 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
         if not messages or self.max_messages == 0:
             return
         history = self._names.table("history_messages")
+        # Encode up front so a value JSONB refuses fails before any SQL, not halfway through a save.
+        encoded = {id(message): encode_jsonb(message.to_dict(), what="History message") for message in messages}
         async with self._client.connection() as connection:
             await connection.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended("
@@ -152,7 +154,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
                         " (application_id, tenant_id, agent_id, source_id, session_id, message, expires_at)"
                         " VALUES (%(app)s, %(tenant)s, %(agent)s, %(source)s, %(session)s, %(message)s, {expires})"
                     ).format(history=history, expires=EXPIRES_AT),
-                    [params | {"message": Jsonb(message.to_dict()), "ttl": self._ttl()} for message in new_messages],
+                    [params | {"message": encoded[id(message)], "ttl": self._ttl()} for message in new_messages],
                 )
             if self.max_messages is not None:
                 await connection.execute(

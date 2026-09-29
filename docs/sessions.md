@@ -29,7 +29,7 @@ PostgresSessionStore(*, application_id, ...)
 - `get(session_id)` returns a new `AgentSession` built with `AgentSession.from_dict`, or `None` when the id is absent or purged. Changing the returned session does not change the stored one.
 - `delete(session_id)` removes the row. Deleting an absent id does nothing.
 - An empty or non-`str` id raises `ValueError`, as in MAF's in-memory store.
-- `set` rejects state containing `nan` or infinity with `ValueError` before it sends any SQL. MAF's in-memory store accepts such values because it never serializes them.
+- `set` rejects state containing `nan`, infinity or a NUL character with `ValueError` before it sends any SQL. See [compatibility.md](compatibility.md#jsonb-limits). MAF's in-memory store accepts such values because it never serializes them.
 - Restore a session with the same agent and provider configuration that created it.
 
 ## Example

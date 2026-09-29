@@ -9,10 +9,10 @@ from typing import Any
 from agent_framework import SecretString, WorkflowCheckpoint
 from agent_framework.exceptions import WorkflowCheckpointException
 from psycopg import sql
-from psycopg.types.json import Jsonb
 
 from ._client import ClientHandle, PostgresClient, optional_text
 from ._framework import decode_checkpoint_value, encode_checkpoint_value
+from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
@@ -87,6 +87,7 @@ class PostgresCheckpointStorage(BaseStore):
                 f"Checkpoint {checkpoint.checkpoint_id} cannot be encoded or restored"
                 " under this storage's allowed types."
             ) from exc
+        adapted = encode_jsonb(encoded, what="Checkpoint")
         async with self._client.connection() as connection:
             await connection.execute(
                 sql.SQL(
@@ -106,7 +107,7 @@ class PostgresCheckpointStorage(BaseStore):
                     "previous": checkpoint.previous_checkpoint_id,
                     "when": when,
                     "iteration": checkpoint.iteration_count,
-                    "encoded": Jsonb(encoded),
+                    "encoded": adapted,
                     "ttl": self._ttl(),
                 },
             )

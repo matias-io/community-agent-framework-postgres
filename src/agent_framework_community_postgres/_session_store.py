@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any, ClassVar, cast
 
 from agent_framework import AgentSession, SecretString, SessionStore
 from psycopg import sql
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 from ._client import ClientHandle, PostgresClient
+from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
@@ -70,11 +69,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
     async def set(self, session_id: str, session: AgentSession) -> None:
         """Store the session, replacing any existing snapshot."""
         SessionStore.validate_session_id(session_id)
-        snapshot: dict[str, Any] = session.to_dict()
-        try:
-            json.dumps(snapshot, allow_nan=False)
-        except ValueError as exc:
-            raise ValueError("Session state must be JSON-compatible: non-finite floats cannot be stored.") from exc
+        snapshot = encode_jsonb(session.to_dict(), what="Session state")
         async with self._client.connection() as connection:
             await connection.execute(
                 sql.SQL(
@@ -88,7 +83,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
                 {
                     "app": self.application_id,
                     "id": session_id,
-                    "snapshot": Jsonb(snapshot),
+                    "snapshot": snapshot,
                     "version": self.SNAPSHOT_VERSION,
                     "ttl": self._ttl(),
                 },

@@ -12,9 +12,9 @@ from typing import Any
 from agent_framework import SecretString
 from psycopg import sql
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
 from ._client import ClientHandle, PostgresClient, RevisionConflict, require_text
+from ._json import encode_jsonb
 from ._leases import Lease, PostgresLeases
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
@@ -136,8 +136,8 @@ class PostgresDocumentStore(BaseStore):
         if expected_revision is not None and expected_revision < 0:
             raise ValueError("expected_revision must be None, 0 or a positive integer.")
         params = self._params(scope, key) | {
-            "payload": Jsonb(payload),
-            "metadata": Jsonb(metadata) if metadata is not None else None,
+            "payload": encode_jsonb(payload, what="Document payload"),
+            "metadata": encode_jsonb(metadata, what="Document metadata") if metadata is not None else None,
             "ttl": self._ttl(),
             "expected": expected_revision,
         }

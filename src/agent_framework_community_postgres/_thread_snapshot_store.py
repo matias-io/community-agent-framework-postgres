@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from ._client import ClientHandle, PostgresClient, require_text
+from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
@@ -63,11 +64,17 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
     _KEY = sql.SQL("application_id = %(app)s AND scope = %(scope)s AND thread_id = %(thread)s")
 
     @staticmethod
-    def _jsonb(value: Any) -> Jsonb | None:
-        return Jsonb(value) if value is not None else None
+    def _jsonb(value: Any, what: str) -> Jsonb | None:
+        return encode_jsonb(value, what=what) if value is not None else None
 
     async def save(self, *, scope: str, thread_id: str, snapshot: AGUIThreadSnapshot) -> None:
         """Store the latest snapshot for the thread, replacing the previous one."""
+        values = {
+            "messages": encode_jsonb(list(snapshot.messages), what="Thread snapshot messages"),
+            "state": self._jsonb(snapshot.state, "Thread snapshot state"),
+            "interrupt": self._jsonb(snapshot.interrupt, "Thread snapshot interrupt"),
+            "session_state": self._jsonb(snapshot.session_state, "Thread snapshot session state"),
+        }
         async with self._client.connection() as connection:
             await connection.execute(
                 sql.SQL(
@@ -80,14 +87,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
                     " session_state = EXCLUDED.session_state, revision = {snapshots}.revision + 1,"
                     " updated_at = now(), expires_at = EXCLUDED.expires_at, purged_at = NULL"
                 ).format(snapshots=self._names.table("thread_snapshots"), expires=EXPIRES_AT),
-                self._params(scope, thread_id)
-                | {
-                    "messages": Jsonb(list(snapshot.messages)),
-                    "state": self._jsonb(snapshot.state),
-                    "interrupt": self._jsonb(snapshot.interrupt),
-                    "session_state": self._jsonb(snapshot.session_state),
-                    "ttl": self._ttl(),
-                },
+                self._params(scope, thread_id) | values | {"ttl": self._ttl()},
             )
 
     async def get(self, *, scope: str, thread_id: str) -> AGUIThreadSnapshot | None:

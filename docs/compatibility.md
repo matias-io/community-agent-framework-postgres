@@ -26,10 +26,11 @@ MAF does not export the three names below. Microsoft's own Cosmos DB and Redis p
 
 Every payload is stored as PostgreSQL `jsonb`, which changes a few values.
 
-- A string containing the NUL character (`\u0000`) cannot be stored. The write fails with `PostgresStorageError`.
+- A string or key containing the NUL character (`\u0000`) cannot be stored. Every store refuses it with `ValueError` before any SQL runs.
 - A float of about `1e16` or more comes back as an `int`.
 - `-0.0` comes back as `0.0`.
-- `nan` and infinity are not JSON. `PostgresSessionStore.set` rejects them with `ValueError` before any SQL runs. Other stores send them, and PostgreSQL rejects the write with `PostgresStorageError`.
+- `nan` and infinity are not JSON. Every store refuses them with `ValueError` before any SQL runs, as it does a circular reference or any value `json` cannot encode.
+- These errors name the field, for example `Document payload`, and the Python error type. They never quote the value.
 
 Ordinary strings, integers, floats, booleans, lists and objects round-trip exactly.
 
