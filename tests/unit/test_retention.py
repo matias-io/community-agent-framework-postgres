@@ -32,3 +32,18 @@ def test_purge_report_adds_and_totals() -> None:
 
 def test_expires_at_fragment_uses_the_ttl_parameter_twice() -> None:
     assert EXPIRES_AT.as_string().count("%(ttl)s") == 2
+
+
+def test_purge_reports_sum_without_a_start_value() -> None:
+    total = sum([PurgeReport({"af_documents": 2}), PurgeReport({"af_sessions": 3})])
+    assert isinstance(total, PurgeReport)
+    assert total.counts == {"af_documents": 2, "af_sessions": 3}
+
+
+def test_purge_report_counts_are_a_read_only_copy() -> None:
+    source = {"af_documents": 1}
+    report = PurgeReport(source)
+    source["af_documents"] = 5
+    assert report.counts == {"af_documents": 1}
+    with pytest.raises(TypeError):
+        report.counts["af_documents"] = 2  # type: ignore[index]

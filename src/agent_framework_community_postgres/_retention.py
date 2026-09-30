@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
+from types import MappingProxyType
 from typing import Any, Literal
 
 from psycopg import AsyncConnection, sql
@@ -41,9 +42,12 @@ class RetentionPolicy:
 
 @dataclass(frozen=True)
 class PurgeReport:
-    """Rows affected per table by one purge."""
+    """Rows affected per table by one purge; ``counts`` is a read-only copy. ``sum(reports)`` works."""
 
     counts: Mapping[str, int] = field(default_factory=dict[str, int])
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
 
     @property
     def total(self) -> int:
@@ -54,6 +58,11 @@ class PurgeReport:
         for table, count in other.counts.items():
             merged[table] = merged.get(table, 0) + count
         return PurgeReport(merged)
+
+    def __radd__(self, other: int) -> PurgeReport:
+        if other == 0:  # the start value of sum()
+            return self
+        return NotImplemented
 
 
 async def purge_rows(
@@ -68,10 +77,12 @@ async def purge_rows(
     """Tombstone or delete the expired rows matching ``where``; return the count."""
     if mode == "tombstone" and tombstone is not None:
         statement = sql.SQL(
-            "UPDATE {table} SET {tombstone}, purged_at = now() WHERE {where}"
+            "UPDATE {table} SET {tombstone}, purged_at = now() WHERE ({where})"
             " AND expires_at < now() AND purged_at IS NULL"
         ).format(table=table, tombstone=tombstone, where=where)
     else:
-        statement = sql.SQL("DELETE FROM {table} WHERE {where} AND expires_at < now()").format(table=table, where=where)
+        statement = sql.SQL("DELETE FROM {table} WHERE ({where}) AND expires_at < now()").format(
+            table=table, where=where
+        )
     cursor = await connection.execute(statement, dict(params))
     return cursor.rowcount
