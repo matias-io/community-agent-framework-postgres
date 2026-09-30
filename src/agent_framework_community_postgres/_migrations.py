@@ -5,16 +5,15 @@ from __future__ import annotations
 import zlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import cast
 
 from psycopg import sql
 
-from ._client import ClientHandle, TableNames
+from ._client import ClientHandle, PostgresStorageError, TableNames
 
-Migration = Callable[[TableNames], Sequence[sql.Composable]]
+Migration = Callable[[TableNames], Sequence[sql.Composed]]
 
 
-def _v1(names: TableNames) -> list[sql.Composable]:
+def _v1(names: TableNames) -> list[sql.Composed]:
     t = names.table
     i = names.index
     return [
@@ -138,6 +137,8 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
     Each version is one transaction (``BEGIN;`` ... ``COMMIT;``), as in ``migrate``.
     """
     chosen = list(range(1, len(MIGRATIONS) + 1)) if versions is None else list(versions)
+    if any(not 1 <= version <= len(MIGRATIONS) for version in chosen):
+        raise ValueError(f"versions must be between 1 and {len(MIGRATIONS)}.")
     parts: list[str] = []
     if chosen:
         parts.append(_version_table(names).as_string() + ";")
@@ -169,14 +170,25 @@ async def current_version(client: ClientHandle, names: TableNames) -> int:
         return int(row[0]) if row else 0
 
 
+def ensure_supported(current: int) -> None:
+    """Raise ``PostgresStorageError`` when the database was migrated by a newer release of this package."""
+    if current > len(MIGRATIONS):
+        raise PostgresStorageError(
+            f"Database schema version {current} is newer than this package supports ({len(MIGRATIONS)});"
+            " upgrade the package."
+        )
+
+
 async def pending_versions(client: ClientHandle, names: TableNames) -> list[int]:
-    """Versions ``migrate`` would apply now."""
+    """Versions ``migrate`` would apply now; raise when the database is newer than this package."""
     current = await current_version(client, names)
+    ensure_supported(current)
     return list(range(current + 1, len(MIGRATIONS) + 1))
 
 
 async def migrate(client: ClientHandle, names: TableNames) -> MigrationReport:
     """Apply every pending migration, one transaction each, serialized across processes by an advisory lock."""
+    # A crc32 collision between two schemas' keys only makes their migrations wait for each other.
     lock_key = zlib.crc32(names.qualified("migrations").encode("utf-8"))
     applied: list[int] = []
     async with client.connection() as connection:
@@ -193,7 +205,7 @@ async def migrate(client: ClientHandle, names: TableNames) -> MigrationReport:
             if await cursor.fetchone() is not None:
                 continue  # another process applied it while we waited for the lock
             for statement in MIGRATIONS[version - 1](names):
-                await connection.execute(cast(sql.Composed, statement))
+                await connection.execute(statement)
             await connection.execute(
                 sql.SQL("INSERT INTO {migrations} (version) VALUES (%s)").format(migrations=names.table("migrations")),
                 (version,),

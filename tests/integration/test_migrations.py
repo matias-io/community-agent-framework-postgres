@@ -4,7 +4,7 @@ import pytest
 from agent_framework import SecretString
 from psycopg import sql
 
-from agent_framework_community_postgres._client import ClientHandle, TableNames
+from agent_framework_community_postgres._client import ClientHandle, PostgresStorageError, TableNames
 from agent_framework_community_postgres._migrations import current_version, migrate, pending_versions
 
 pytestmark = pytest.mark.integration
@@ -71,3 +71,18 @@ async def test_concurrent_first_runs_apply_once_and_never_raise(test_dsn: str, s
                 await c.close()
         assert sorted(r.applied for r in reports) == [(), (), (), (1,)]
         assert all(r.current == 1 for r in reports)
+
+
+_NEWER = "Database schema version 99 is newer than this package supports (1); upgrade the package."
+
+
+async def test_a_database_newer_than_the_package_is_refused(client: ClientHandle, migrated: TableNames) -> None:
+    async with client.connection() as connection:
+        await connection.execute(sql.SQL("INSERT INTO {} (version) VALUES (99)").format(migrated.table("migrations")))
+    assert await current_version(client, migrated) == 99
+    with pytest.raises(PostgresStorageError) as info:
+        await pending_versions(client, migrated)
+    assert str(info.value) == _NEWER
+    with pytest.raises(PostgresStorageError) as info:
+        await migrate(client, migrated)
+    assert str(info.value) == _NEWER

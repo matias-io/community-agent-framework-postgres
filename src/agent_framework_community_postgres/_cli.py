@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from agent_framework.exceptions import SettingNotFoundError
 
 from ._client import PostgresStorageError, TableNames
-from ._migrations import MIGRATIONS, render
+from ._migrations import MIGRATIONS, current_version, ensure_supported, render
 from ._persistence import PostgresPersistence
 
 
@@ -60,9 +60,10 @@ async def _run(args: argparse.Namespace) -> int:
             report = await persistence.migrate()
             print(f"applied: {', '.join(map(str, report.applied)) or 'none'}; current version: {report.current}")
         elif args.command == "status":
-            pending = await persistence.pending_migrations()
-            current = len(MIGRATIONS) if not pending else pending[0] - 1
+            current = await current_version(persistence._client, persistence.names)  # pyright: ignore[reportPrivateUsage]
+            pending = range(current + 1, len(MIGRATIONS) + 1)
             print(f"current version: {current}; pending: {', '.join(map(str, pending)) or 'none'}")
+            ensure_supported(current)
         else:
             report = await persistence.purge(mode=args.mode)
             for table, count in sorted(report.counts.items()):

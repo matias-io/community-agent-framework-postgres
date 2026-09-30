@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from agent_framework_community_postgres._client import TableNames
 from agent_framework_community_postgres._migrations import MIGRATIONS, render
 
@@ -40,3 +42,9 @@ def test_render_wraps_each_version_in_one_transaction() -> None:
     assert text.count("COMMIT;") == len(MIGRATIONS)
     assert text.index("BEGIN;") > text.index("-- version 1")
     assert text.index("COMMIT;") > text.index("INSERT INTO")
+
+
+@pytest.mark.parametrize("versions", [[0], [2], [-1], [1, 2]])
+def test_render_rejects_unknown_versions(versions: list[int]) -> None:
+    with pytest.raises(ValueError, match="between 1 and 1"):
+        render(TableNames(), versions=versions)

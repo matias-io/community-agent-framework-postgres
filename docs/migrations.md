@@ -26,6 +26,8 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
 
 `migrate()` returns a `MigrationReport`. `applied` holds the versions this call ran, and `current` the version now in place. On an empty schema the script prints `(1,) 1` and `[]`. A second run prints `() 1`.
 
+A database migrated by a newer release of this package has a version this one does not know. `migrate()` and `pending_migrations()` then raise `PostgresStorageError` and ask you to upgrade the package, and the CLI's `status` prints the real version before that error. `render_migrations` raises `ValueError` for a version outside 1 to `len(MIGRATIONS)`.
+
 ## Concurrency
 
 `migrate()` is safe to call from every replica at startup. Each step takes `pg_advisory_xact_lock` on a key derived from the schema and prefix, so two processes never migrate the same tables at once. Each version runs in its own transaction and is skipped when another process recorded it while this one waited. The lock is transaction scoped, so it works behind a transaction-mode pooler and is released when the transaction ends.
