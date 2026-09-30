@@ -71,7 +71,10 @@ _UNREACHABLE = [
     "postgresql://postgres:wrong@127.0.0.1:5433/agent_framework",
     "host=127.0.0.1 port=1 dbname=x",
 ]
-_CLEAR = "Could not connect to PostgreSQL within 10 seconds"
+_CLEAR = (
+    "No PostgreSQL connection became available within 10 seconds: the database is unreachable or every pooled"
+    " connection is busy; psycopg_pool logs the driver's reason."
+)
 
 
 async def _fail_once(handle: ClientHandle) -> None:
@@ -79,7 +82,7 @@ async def _fail_once(handle: ClientHandle) -> None:
     with pytest.raises(PostgresStorageError) as info:
         async with handle.connection():
             pass
-    assert str(info.value).startswith(_CLEAR)
+    assert str(info.value) == _CLEAR
     assert time.monotonic() - started < 15
 
 
@@ -130,3 +133,17 @@ async def test_concurrent_calls_over_one_borrowed_connection_are_serialized(test
     async with await AsyncConnection.connect(test_dsn, autocommit=True) as other:
         cursor = await other.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_documents")))
         assert await cursor.fetchone() == (10,)
+
+
+@pytest.mark.timeout(30)
+async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) -> None:
+    pool = AsyncConnectionPool(test_dsn, open=False, min_size=1, max_size=1, timeout=2.0)
+    await pool.open()
+    try:
+        async with pool.connection():
+            with pytest.raises(PostgresStorageError) as info:
+                async with ClientHandle(None, pool).connection():
+                    pass
+        assert str(info.value) == _CLEAR.replace("10 seconds", "2 seconds")
+    finally:
+        await pool.close()

@@ -136,10 +136,13 @@ class ClientHandle:
         self._parent: ClientHandle | None = None
 
     @staticmethod
-    def _unreachable() -> PostgresStorageError:
+    def _no_connection(pool: AsyncConnectionPool[AsyncConnection[Any]]) -> PostgresStorageError:
+        # psycopg_pool raises the same PoolTimeout for a database that is down and for a pool whose
+        # connections are all busy, so the message names both.
+        seconds = f"{pool.timeout:g} second{'' if pool.timeout == 1 else 's'}"
         return PostgresStorageError(
-            f"Could not connect to PostgreSQL within {_CONNECT_TIMEOUT_SECONDS} seconds; "
-            "the driver's reason is logged by psycopg_pool."
+            f"No PostgreSQL connection became available within {seconds}: the database is unreachable or"
+            " every pooled connection is busy; psycopg_pool logs the driver's reason."
         )
 
     def __repr__(self) -> str:
@@ -187,7 +190,8 @@ class ClientHandle:
                 async with lock, self.client.transaction():
                     yield self.client
         except PoolTimeout as exc:
-            raise self._unreachable() from exc
+            assert isinstance(self.client, AsyncConnectionPool)  # noqa: S101 - only a pool raises PoolTimeout
+            raise self._no_connection(self.client) from exc
         except Error as exc:
             raise PostgresStorageError("PostgreSQL operation failed; see the chained driver exception.") from exc
 

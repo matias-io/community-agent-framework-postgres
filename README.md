@@ -192,7 +192,7 @@ Every store and the hub take the same connection arguments.
 - A connection string makes the store own a pool with `min_size=1`, `max_size=10`, autocommit, libpq `connect_timeout=10` unless the string sets one, and a pool `timeout` of 10 seconds.
 - `schema="public"` must be a lowercase identifier that does not start with `pg_`. `table_prefix="af_"` allows lowercase letters, digits and underscores, up to 35 bytes.
 
-When the database is down or rejects the login, each call raises `PostgresStorageError("Could not connect to PostgreSQL within 10 seconds; ...")` after about 10 seconds. The owned pool keeps retrying in the background and recovers when the database returns. psycopg_pool logs the driver's reason on the `psycopg.pool` logger. If you need other timeouts, pass your own pool. A malformed connection string raises `PostgresStorageError("Invalid connection string.")` and never repeats libpq's text, which can contain the password.
+When the database is down or rejects the login, or every pooled connection stays busy, each call raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` after about 10 seconds. psycopg_pool raises the same timeout in both cases, so the message names both. Over your own pool, the message gives that pool's `timeout`. The owned pool keeps retrying in the background and recovers when the database returns. psycopg_pool logs the driver's reason on the `psycopg.pool` logger. If you need other timeouts, pass your own pool. A malformed connection string raises `PostgresStorageError("Invalid connection string.")` and never repeats libpq's text, which can contain the password.
 
 ## Schema
 
