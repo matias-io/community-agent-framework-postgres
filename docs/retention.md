@@ -44,7 +44,7 @@ A tombstone keeps the ids, timestamps, revision and metadata and sets `purged_at
 
 ## Scope of a purge
 
-- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, all checkpoint scopes and all document collections.
+- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, all checkpoint scopes and all document collections. Each table is purged in its own transaction, so a failure part way keeps the tables already purged.
 - A store's `purge()` covers that store's rows only. The history provider covers its application, tenant, agent and source. A checkpoint storage covers its scope. A document store covers its collection.
 - A purge acts on every expired row in its scope, whichever policy stamped it. A hub or store built without a policy still purges rows another store wrote with one.
 - `hub.purge(mode=None)` uses `mode` when you pass it, otherwise the hub policy's mode, which defaults to `"tombstone"`. A store's `purge()` uses its own policy's mode.

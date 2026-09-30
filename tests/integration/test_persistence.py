@@ -1,9 +1,11 @@
 import asyncio
+from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 
 import pytest
 from agent_framework import AgentSession, Message
 from agent_framework_ag_ui import AGUIThreadSnapshot
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from agent_framework_community_postgres import PostgresPersistence, PostgresStorageError, RetentionPolicy
@@ -153,3 +155,20 @@ async def test_hub_purge_mode_argument_wins(test_dsn: str, schema: str) -> None:
         await asyncio.sleep(1.5)
         assert (await persistence.purge(mode="delete")).counts["af_documents"] == 1
         assert await notes.list(scope="u", include_purged=True) == []
+
+
+async def test_hub_purge_commits_each_table_on_its_own(
+    persistence: PostgresPersistence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handle = persistence._client  # noqa: SLF001
+    original = handle.connection
+    opened: list[int] = []
+
+    def counting() -> AbstractAsyncContextManager[AsyncConnection]:
+        opened.append(1)
+        return original()
+
+    monkeypatch.setattr(handle, "connection", counting)
+    report = await persistence.purge()
+    assert len(report.counts) == 5
+    assert len(opened) == 5

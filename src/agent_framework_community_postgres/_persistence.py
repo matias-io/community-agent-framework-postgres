@@ -133,6 +133,7 @@ class PostgresPersistence:
 
         A row is expired when its ``expires_at``, stamped by whichever policy wrote it, has
         passed; the hub needs no policy of its own. ``mode`` defaults to the hub policy's mode.
+        Each table is purged in its own transaction.
         """
         chosen = RetentionPolicy(mode=mode).mode if mode is not None else self.retention.mode
         where = sql.SQL("application_id = %(app)s")
@@ -149,8 +150,10 @@ class PostgresPersistence:
             ("documents", sql.SQL("payload = NULL"), True),
         ]
         counts: dict[str, int] = {}
-        async with self._client.connection() as connection:
-            for table, tombstone, tombstone_allowed in plan:
+        # One transaction per table: row locks are never held across tables, so a long purge cannot
+        # deadlock with, say, a history trim on the same session.
+        for table, tombstone, tombstone_allowed in plan:
+            async with self._client.connection() as connection:
                 counts[f"{self.names.prefix}{table}"] = await purge_rows(
                     connection,
                     table=self.names.table(table),
