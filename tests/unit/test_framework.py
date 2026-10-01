@@ -1,6 +1,9 @@
+import importlib
 import uuid
 from datetime import UTC, datetime
 
+import agent_framework._sessions as sessions_module
+import pytest
 from agent_framework import Message
 
 from agent_framework_community_postgres import _framework
@@ -26,3 +29,15 @@ def test_filter_new_messages_drops_a_replayed_prefix() -> None:
     third = Message(role="user", contents=["more"])
     new = _framework.filter_new_messages([first, second], [first, second, third])
     assert [m.text for m in new] == ["more"]
+
+
+def test_a_missing_private_name_is_named_in_the_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(sessions_module, "filter_new_messages")
+    try:
+        with pytest.raises(ImportError) as info:
+            importlib.reload(_framework)
+        assert "filter_new_messages" in str(info.value)
+        assert ">=1.19.0,<2" in str(info.value)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(_framework)

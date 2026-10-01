@@ -21,15 +21,15 @@ def installed_core_version() -> str:
 
 
 try:
-    # Since 1.14: shared dedupe used by every history provider (Cosmos, Redis, File).
+    # The shared dedupe every history provider (Cosmos, Redis, File) uses.
     from agent_framework._sessions import filter_new_messages
 
-    # Since 1.13: the hybrid JSON + restricted-pickle encoding File and Cosmos storage use.
+    # The hybrid JSON + restricted-pickle encoding File and Cosmos storage use.
     from agent_framework._workflows._checkpoint_encoding import decode_checkpoint_value, encode_checkpoint_value
 except ImportError as exc:  # pragma: no cover - exercised only by an incompatible upstream release
     raise ImportError(
         f"agent-framework-core {installed_core_version()} no longer provides a private name this package relies on "
-        f"({exc.name}). This release supports agent-framework-core {SUPPORTED_CORE}; check for a newer "
+        f"({exc}). This release supports agent-framework-core {SUPPORTED_CORE}; check for a newer "
         "community-agent-framework-postgres."
     ) from exc
 
