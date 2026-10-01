@@ -43,15 +43,41 @@ class PostgresStorageError(IntegrationException):
 
 
 class RevisionConflict(PostgresStorageError):
-    """A write carried ``expected_revision`` and the stored row had a different one."""
+    """A write carried ``expected_revision`` and the stored row had a different one.
+
+    The message names no ids; ``collection``, ``scope``, ``key`` and ``expected_revision`` carry them.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        collection: str | None = None,
+        scope: str | None = None,
+        key: str | None = None,
+        expected_revision: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.collection = collection
+        self.scope = scope
+        self.key = key
+        self.expected_revision = expected_revision
 
 
-class LeaseUnavailable(PostgresStorageError):
-    """Another owner holds the lease and the wait budget ran out."""
+class _LeaseError(PostgresStorageError):
+    """A lease error; the message names no resource, which ``resource`` carries."""
+
+    def __init__(self, message: str, *, resource: str | None = None) -> None:
+        super().__init__(message)
+        self.resource = resource
 
 
-class LeaseLost(PostgresStorageError):
-    """The lease expired or was taken over before ``renew`` or ``release`` ran."""
+class LeaseUnavailable(_LeaseError):
+    """Someone holds the lease and the wait budget ran out."""
+
+
+class LeaseLost(_LeaseError):
+    """The lease expired or was taken over before ``renew`` ran."""
 
 
 def require_text(value: object, name: str) -> str:

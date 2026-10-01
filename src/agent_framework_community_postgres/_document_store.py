@@ -175,7 +175,11 @@ class PostgresDocumentStore(BaseStore):
             row = await cursor.fetchone()
         if row is None:
             raise RevisionConflict(
-                f"Document {key!r} in {self.collection!r} did not have revision {expected_revision}."
+                "The document did not have the expected revision.",
+                collection=self.collection,
+                scope=scope,
+                key=key,
+                expected_revision=expected_revision,
             )
         return int(row[0])
 

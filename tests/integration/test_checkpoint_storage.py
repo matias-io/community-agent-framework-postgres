@@ -181,3 +181,22 @@ async def test_a_real_workflow_checkpoints_and_resumes(storage: PostgresCheckpoi
     assert checkpoints, "the run should have produced checkpoints"
     resumed = [event async for event in workflow.run(checkpoint_id=checkpoints[-1].checkpoint_id, stream=True)]
     assert resumed  # resuming from the last checkpoint runs without raising
+
+
+async def test_checkpoint_messages_and_logs_name_no_ids(
+    storage: PostgresCheckpointStorage, caplog: pytest.LogCaptureFixture
+) -> None:
+    checkpoint = _checkpoint(workflow_name="secret-workflow", checkpoint_id="secret-id")
+    with caplog.at_level(logging.DEBUG, logger="agent_framework_community_postgres"):
+        await storage.save(checkpoint)
+    assert all("secret" not in record.getMessage() for record in caplog.records)
+    with pytest.raises(WorkflowCheckpointException) as missing:
+        await storage.load("secret-missing")
+    assert "secret" not in str(missing.value)
+    with pytest.raises(WorkflowCheckpointException) as bad_time:
+        await storage.save(_checkpoint(checkpoint_id="secret-id-2", timestamp="not a time"))
+    assert "secret" not in str(bad_time.value)
+    unregistered = _checkpoint(checkpoint_id="secret-id-3", state={"app": _AppState(1)})
+    with pytest.raises(WorkflowCheckpointException) as refused:
+        await storage.save(unregistered)
+    assert "secret" not in str(refused.value)

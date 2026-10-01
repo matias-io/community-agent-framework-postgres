@@ -115,7 +115,7 @@ class PostgresLeases(BaseStore):
             if lease is not None:
                 break
             if time.monotonic() >= deadline:
-                raise LeaseUnavailable(f"Lease on {resource!r} is held by another owner.")
+                raise LeaseUnavailable("The lease is held by another acquisition.", resource=resource)
             await asyncio.sleep(min(delay, max(0.0, deadline - time.monotonic())))
             delay = min(delay * 2, _MAX_DELAY)
         try:
@@ -142,7 +142,7 @@ class PostgresLeases(BaseStore):
                 self._lease_params(lease) | {"ttl": lease.ttl},
             )
             if await cursor.fetchone() is None:
-                raise LeaseLost(f"Lease on {lease.resource!r} expired or was taken over.")
+                raise LeaseLost("The lease expired or was taken over.", resource=lease.resource)
 
     async def _release(self, lease: Lease) -> None:
         async with self._client.connection() as connection:

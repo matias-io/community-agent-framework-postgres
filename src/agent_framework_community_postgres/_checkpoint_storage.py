@@ -66,9 +66,7 @@ class PostgresCheckpointStorage(BaseStore):
         try:
             parsed = datetime.fromisoformat(checkpoint.timestamp)
         except (TypeError, ValueError) as exc:
-            raise WorkflowCheckpointException(
-                f"Checkpoint {checkpoint.checkpoint_id} has an unparsable timestamp {checkpoint.timestamp!r}."
-            ) from exc
+            raise WorkflowCheckpointException("A checkpoint has an unparsable timestamp.") from exc
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
     def _decode(self, encoded: Any) -> WorkflowCheckpoint:
@@ -85,8 +83,7 @@ class PostgresCheckpointStorage(BaseStore):
             raise
         except Exception as exc:
             raise WorkflowCheckpointException(
-                f"Checkpoint {checkpoint.checkpoint_id} cannot be encoded or restored"
-                " under this storage's allowed types."
+                "A checkpoint cannot be encoded or restored under this storage's allowed types."
             ) from exc
         adapted = encode_jsonb(encoded, what="Checkpoint")
         async with self._client.connection() as connection:
@@ -112,7 +109,7 @@ class PostgresCheckpointStorage(BaseStore):
                     "ttl": self._ttl(),
                 },
             )
-        logger.debug("Saved checkpoint for workflow %s", checkpoint.workflow_name)
+        logger.debug("Saved a checkpoint.")
         return checkpoint.checkpoint_id
 
     async def load(self, checkpoint_id: str) -> WorkflowCheckpoint:
@@ -127,7 +124,7 @@ class PostgresCheckpointStorage(BaseStore):
             )
             row = await cursor.fetchone()
         if row is None:
-            raise WorkflowCheckpointException(f"No checkpoint found with ID {checkpoint_id}")
+            raise WorkflowCheckpointException("No checkpoint found with that ID in this scope.")
         return self._decode(row[0])
 
     async def _rows(self, workflow_name: str, *, newest_first: bool = False, limit: int | None = None) -> list[Any]:

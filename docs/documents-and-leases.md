@@ -33,7 +33,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - `expected_revision=None` writes whether or not the document exists.
 - `expected_revision=0` creates the document only when it is absent or purged. A purged row is reused and its revision continues from the old one.
 - `expected_revision=n` updates only when the stored revision is `n`.
-- A mismatch raises `RevisionConflict` and writes nothing.
+- A mismatch raises `RevisionConflict` and writes nothing. Its message names no ids. The exception carries `collection`, `scope`, `key` and `expected_revision` as attributes.
 - A negative `expected_revision` raises `ValueError`.
 - `payload` must be a `dict`, and `metadata` a `dict` or `None`. Anything else raises `TypeError`.
 - `metadata=None` keeps the stored metadata. A new document gets `{}`.
@@ -53,6 +53,8 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another acquisition took it.
 - Leases use plain rows, not advisory locks, so they work behind a transaction-mode pooler and never hold a connection during your work.
 - Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
+
+`LeaseUnavailable` and `LeaseLost` carry the resource name as `resource` and never put it in the message, because a scope is often a user or visitor id.
 
 `PostgresLeases` (from `hub.leases()`) offers the same leases for any resource name, through `acquire(resource, *, owner, ttl, wait)` and `try_acquire(resource, *, owner, ttl)`, which returns `None` instead of waiting.
 

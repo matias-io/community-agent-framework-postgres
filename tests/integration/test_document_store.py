@@ -220,3 +220,13 @@ async def test_store_without_a_policy_purges_rows_another_policy_stamped(
     assert (await documents.purge()).counts == {"af_documents": 1}
     assert await documents.get(scope="s", key="old") is None
     assert await documents.get(scope="s", key="kept") is not None
+
+
+async def test_revision_conflict_names_no_ids_and_carries_them_as_attributes(
+    documents: PostgresDocumentStore,
+) -> None:
+    with pytest.raises(RevisionConflict) as info:
+        await documents.put(scope="secret-scope", key="secret-key", payload={}, expected_revision=3)
+    assert "secret" not in str(info.value) and "threads" not in str(info.value)
+    assert (info.value.collection, info.value.scope, info.value.key) == ("threads", "secret-scope", "secret-key")
+    assert info.value.expected_revision == 3

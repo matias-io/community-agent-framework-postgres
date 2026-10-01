@@ -129,3 +129,18 @@ async def test_lease_is_released_when_the_body_raises(leases: PostgresLeases) ->
             raise RuntimeError("body failed")
     other = await leases.try_acquire("threads/j", owner="two", ttl=timedelta(seconds=30))
     assert other is not None
+
+
+async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(leases: PostgresLeases) -> None:
+    resource = "threads/secret-visitor"
+    async with leases.acquire(resource, owner="one", ttl=timedelta(seconds=1)) as lease:
+        with pytest.raises(LeaseUnavailable) as unavailable:
+            async with leases.acquire(resource, owner="two", ttl=timedelta(seconds=30)):
+                pass
+        assert "secret" not in str(unavailable.value)
+        assert unavailable.value.resource == resource
+        await asyncio.sleep(1.5)
+        with pytest.raises(LeaseLost) as lost:
+            await lease.renew()
+        assert "secret" not in str(lost.value)
+        assert lost.value.resource == resource
