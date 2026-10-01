@@ -65,3 +65,7 @@ async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) 
     await asyncio.sleep(1.5)
     assert (await store.purge()).counts == {"af_thread_snapshots": 1}
     assert await store.get(scope="u", thread_id="t") is None
+    assert await store.delete(scope="u", thread_id="t") is False  # a tombstone is not a live snapshot
+    await store.save(scope="u", thread_id="t", snapshot=_snapshot(2))
+    assert await store.delete(scope="u", thread_id="t") is True
+    assert await store.delete(scope="u", thread_id="t") is False

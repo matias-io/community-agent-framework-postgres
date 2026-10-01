@@ -107,15 +107,19 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
         )
 
     async def delete(self, *, scope: str, thread_id: str) -> bool:
-        """Remove the thread's snapshot; ``True`` when one existed."""
+        """Remove the thread's snapshot; ``True`` when a live one existed.
+
+        A purged row is removed too, and returns ``False``.
+        """
         async with self._client.connection() as connection:
             cursor = await connection.execute(
-                sql.SQL("DELETE FROM {snapshots} WHERE {key}").format(
+                sql.SQL("DELETE FROM {snapshots} WHERE {key} RETURNING purged_at IS NULL").format(
                     snapshots=self._names.table("thread_snapshots"), key=self._KEY
                 ),
                 self._params(scope, thread_id),
             )
-            return cursor.rowcount > 0
+            row = await cursor.fetchone()
+        return row is not None and bool(row[0])
 
     async def clear(self, *, scope: str | None = None) -> None:
         """Remove every snapshot of this application, or only one scope's."""

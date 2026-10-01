@@ -89,6 +89,8 @@ async def test_retention_tombstone(client: ClientHandle, migrated: TableNames) -
     purged = await store.list(scope="s", include_purged=True)
     assert purged[0].purged_at is not None and purged[0].metadata == {"title": "old"}
     assert (await store.purge()).total == 0  # already tombstoned rows are not counted again
+    assert await store.delete(scope="s", key="old") is False  # a tombstone is not a live document
+    assert await store.list(scope="s", include_purged=True) == []  # but the row is removed
 
 
 async def test_retention_delete(client: ClientHandle, migrated: TableNames) -> None:

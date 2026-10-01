@@ -180,20 +180,24 @@ class PostgresDocumentStore(BaseStore):
         return int(row[0])
 
     async def delete(self, *, scope: str, key: str) -> bool:
-        """Remove the document; ``True`` when a row existed."""
+        """Remove the document; ``True`` when a live one existed. A purged row is removed too, returning ``False``."""
         async with self._client.connection() as connection:
             cursor = await connection.execute(
-                sql.SQL("DELETE FROM {documents} WHERE {where}").format(
+                sql.SQL("DELETE FROM {documents} WHERE {where} RETURNING purged_at IS NULL").format(
                     documents=self._names.table("documents"), where=self._where_key()
                 ),
                 self._params(scope, key),
             )
-            return cursor.rowcount > 0
+            row = await cursor.fetchone()
+        return row is not None and bool(row[0])
 
     async def list(
         self, *, scope: str, limit: int = 100, before: DocumentSummary | None = None, include_purged: bool = False
     ) -> builtins.list[DocumentSummary]:
-        """Summaries in a scope, newest ``updated_at`` first; pass the last ``updated_at`` as ``before`` to page."""
+        """Summaries in a scope, newest ``updated_at`` first; pass the last summary as ``before`` to page.
+
+        ``before`` takes the ``DocumentSummary`` itself, so rows sharing an ``updated_at`` are never skipped.
+        """
         if limit < 1 or limit > _MAX_LIMIT:
             raise ValueError(f"limit must be between 1 and {_MAX_LIMIT}.")
         params: dict[str, Any] = {

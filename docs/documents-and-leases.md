@@ -38,7 +38,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - `payload` must be a `dict`, and `metadata` a `dict` or `None`. Anything else raises `TypeError`.
 - `metadata=None` keeps the stored metadata. A new document gets `{}`.
 
-`get(*, scope, key)` returns a `Document` (payload, metadata, revision, timestamps) or `None` when absent or purged. `delete(*, scope, key)` returns `True` when a row existed.
+`get(*, scope, key)` returns a `Document` (payload, metadata, revision, timestamps) or `None` when absent or purged. `delete(*, scope, key)` removes the row and returns `True` when it held a live document. A purged row is removed too, and `delete` returns `False` for it, as `get` reports it absent.
 
 `list(*, scope, limit=100, before=None, include_purged=False)` returns `DocumentSummary` objects without payloads, newest `updated_at` first. `limit` must be between 1 and 1000. To get the next page, pass the last summary of the previous page as `before`. Paging uses `(updated_at, key)`, so rows with the same timestamp are never skipped.
 
