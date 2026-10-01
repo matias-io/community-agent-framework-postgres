@@ -1,6 +1,6 @@
 # Migrations
 
-The schema is a numbered list of migrations, `MIGRATIONS`, where version `n` is entry `n - 1`. Applied versions are recorded in `af_migrations`. Version 1 creates every table in this package.
+The schema is a numbered list of migrations, `MIGRATIONS`, where version `n` is entry `n - 1`. Applied versions are recorded in `af_migrations`. Version 1 creates every table in this package. The schema must already exist, because `migrate()` creates tables but not the schema. Run `CREATE SCHEMA` first for anything other than `public`.
 
 ## From Python
 
@@ -30,7 +30,7 @@ A database migrated by a newer release of this package has a version this one do
 
 ## Concurrency
 
-`migrate()` is safe to call from every replica at startup. Each step takes `pg_advisory_xact_lock` on a key derived from the schema and prefix, so two processes never migrate the same tables at once. Each version runs in its own transaction and is skipped when another process recorded it while this one waited. The lock is transaction scoped, so it works behind a transaction-mode pooler and is released when the transaction ends.
+`migrate()` is safe to call from every replica at startup. Each step takes `pg_advisory_xact_lock` on a key derived from the schema and prefix, so two processes never migrate the same tables at once. Each version runs in its own transaction and is skipped when another process recorded it while this one waited. The lock is transaction scoped, so it is released when the transaction ends, and a transaction-mode pooler keeps it on one server connection. Behind PgBouncer in transaction mode, pass a pool with `prepare_threshold=None`. See [Standalone use](../README.md#standalone-use).
 
 SQL applied by hand does not take this lock. Do not run it while an application instance may be calling `migrate()` on the same schema.
 
@@ -42,7 +42,7 @@ python -m agent_framework_community_postgres migrate
 python -m agent_framework_community_postgres status
 ```
 
-`migrate` prints `applied: 1; current version: 1`, and `status` prints `current version: 1; pending: none`. `purge [--mode tombstone|delete] --application-id ID` runs `hub.purge()`. See [retention.md](retention.md). `--connection-string`, `--schema`, `--table-prefix` and `--application-id` may come before or after the subcommand. An error prints one `error:` line to stderr and exits with status 1. An invalid option, such as an uppercase `--schema`, a `--table-prefix` that is too long or an empty `--connection-string`, exits with status 2, and `migrate --print` checks `--schema` and `--table-prefix` too. The connection string is never printed. When the database refuses the connection, psycopg_pool's log lines with the driver's reason come before that line.
+`migrate` prints `applied: 1; current version: 1`, and `status` prints `current version: 1; pending: none`. `purge [--mode tombstone|delete] --application-id ID` runs `hub.purge()`. See [retention.md](retention.md). `--connection-string`, `--schema`, `--table-prefix` and `--application-id` may come before or after the subcommand. Prefer `POSTGRES_CONNECTION_STRING` to `--connection-string`, which leaves the password in your shell history and in the process list. An error prints one `error:` line to stderr and exits with status 1. An invalid option, such as an uppercase `--schema`, a `--table-prefix` that is too long or an empty `--connection-string`, exits with status 2, and `migrate --print` checks `--schema` and `--table-prefix` too. The connection string is never printed. When the database refuses the connection, psycopg_pool's log lines with the driver's reason come before that line.
 
 ## SQL for a DBA
 

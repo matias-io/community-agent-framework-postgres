@@ -15,7 +15,7 @@ pip install community-agent-framework-postgres
 pip install "community-agent-framework-postgres[ag-ui]"
 ```
 
-The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works.
+The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works. `from agent_framework_community_postgres import *` also needs the extra, because `__all__` lists that store.
 
 On Windows, async psycopg cannot run on the default `ProactorEventLoop`. Run a script's entry point on a selector loop:
 
@@ -193,6 +193,35 @@ Every store and the hub take the same connection arguments.
 - `schema="public"` must be a lowercase identifier that does not start with `pg_`. `table_prefix="af_"` allows lowercase letters, digits and underscores, up to 35 bytes.
 
 When the database is down or rejects the login, or every pooled connection stays busy, each call raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` after about 10 seconds. psycopg_pool raises the same timeout in both cases, so the message names both. Over your own pool, the message gives that pool's `timeout`. The owned pool keeps retrying in the background and recovers when the database returns. psycopg_pool logs the driver's reason on the `psycopg.pool` logger. If you need other timeouts, pass your own pool. A malformed connection string raises `PostgresStorageError("Invalid connection string.")` and never repeats libpq's text, which can contain the password.
+
+After a database restart or failover, each stale connection in the owned pool fails one call before the pool replaces it. Behind PgBouncer in transaction mode older than 1.21, or without `max_prepared_statements`, psycopg's prepared statements fail, because psycopg prepares a query after its fifth run. For either case, pass your own pool. `check=AsyncConnectionPool.check_connection` tests each connection as the pool hands it out, at the cost of one round trip, and `prepare_threshold=None` turns prepared statements off.
+
+```python
+import asyncio
+import sys
+
+from psycopg_pool import AsyncConnectionPool
+
+from agent_framework_community_postgres import PostgresPersistence
+
+DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+
+
+async def main() -> None:
+    pool = AsyncConnectionPool(
+        DSN,
+        open=False,
+        kwargs={"autocommit": True, "prepare_threshold": None},
+        check=AsyncConnectionPool.check_connection,
+    )
+    async with pool, PostgresPersistence(application_id="my-app", client=pool) as hub:
+        await hub.migrate()
+        print(await hub.pending_migrations())
+
+
+with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
+    runner.run(main())
+```
 
 ## Schema
 

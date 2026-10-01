@@ -17,6 +17,16 @@ uv run pytest
 docker compose -p cafp-pg16 down -v
 ```
 
+In PowerShell:
+
+```powershell
+$env:POSTGRES_VERSION = "16"; $env:POSTGRES_PORT = "5434"; docker compose -p cafp-pg16 up -d --wait
+Remove-Item Env:POSTGRES_VERSION, Env:POSTGRES_PORT
+$env:POSTGRES_TEST_CONNECTION_STRING = "postgresql://postgres:postgres@127.0.0.1:5434/agent_framework"
+uv run pytest
+docker compose -p cafp-pg16 down -v
+```
+
 The last command stops it and deletes its volume.
 
 ## Run the checks
@@ -29,7 +39,17 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-In PowerShell, set the variable with `$env:POSTGRES_TEST_CONNECTION_STRING = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"`. Without it, the integration and conformance tests are skipped. Each integration test creates its own schema and drops it afterwards.
+In PowerShell:
+
+```powershell
+$env:POSTGRES_TEST_CONNECTION_STRING = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+```
+
+Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped. Each integration test creates its own schema and drops it afterwards.
 
 ## Commit messages
 
@@ -53,3 +73,7 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 3. Add an integration test under `tests/integration/`.
 4. When MAF has an in-memory equivalent, add a conformance test under `tests/conformance/` that runs the same cases against both.
 5. Add a page under `docs/`, link it from `README.md`, and add a sample under `samples/`.
+
+## Known follow-ups
+
+- Pin the GitHub Actions in `.github/workflows/` by commit SHA instead of by tag, starting with the release workflow, which can publish to PyPI.

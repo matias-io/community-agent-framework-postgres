@@ -31,7 +31,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 `put(*, scope, key, payload, metadata=None, expected_revision=None)` returns the new revision.
 
 - `expected_revision=None` writes whether or not the document exists.
-- `expected_revision=0` creates the document only when it is absent or purged. A purged row is reused and its revision continues from the old one.
+- `expected_revision=0` creates the document only when it is absent or purged. A purged row is reused and its revision continues from the old one. It keeps its `created_at`, and its metadata unless you pass new `metadata`.
 - `expected_revision=n` updates only when the stored revision is `n`.
 - A mismatch raises `RevisionConflict` and writes nothing. Its message names no ids. The exception carries `collection`, `scope`, `key` and `expected_revision` as attributes.
 - A negative `expected_revision` raises `ValueError`.
@@ -51,7 +51,7 @@ PostgresDocumentStore(*, application_id, collection, ...)
 - A holder that crashed without releasing is recovered by expiry: once its `ttl` has passed, the next acquisition takes the lease.
 - With `wait=0`, a lease that is held raises `LeaseUnavailable` at once. With a longer `wait`, the store retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
 - `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another acquisition took it.
-- Leases use plain rows, not advisory locks, so they work behind a transaction-mode pooler and never hold a connection during your work.
+- Leases use plain rows, not advisory locks, so they never hold a connection during your work. Behind a transaction-mode pooler such as PgBouncer, pass a pool with `prepare_threshold=None`. See [Standalone use](../README.md#standalone-use).
 - Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
 
 `LeaseUnavailable` and `LeaseLost` carry the resource name as `resource` and never put it in the message, because a scope is often a user or visitor id.
