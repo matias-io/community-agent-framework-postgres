@@ -4,6 +4,8 @@ import agent_framework_community_postgres as package
 def test_public_names_are_exported() -> None:
     expected = {
         "PostgresPersistence",
+        "PostgresClient",
+        "RetentionMode",
         "PostgresHistoryProvider",
         "PostgresSessionStore",
         "PostgresCheckpointStorage",

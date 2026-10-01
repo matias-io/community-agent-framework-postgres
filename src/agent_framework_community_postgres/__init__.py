@@ -11,6 +11,7 @@ from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import (
     LeaseLost,
     LeaseUnavailable,
+    PostgresClient,
     PostgresSettings,
     PostgresStorageError,
     RevisionConflict,
@@ -22,7 +23,7 @@ from ._leases import Lease, PostgresLeases
 from ._migrations import MIGRATIONS, MigrationReport
 from ._migrations import render as render_migrations
 from ._persistence import PostgresPersistence
-from ._retention import PurgeReport, RetentionPolicy
+from ._retention import PurgeReport, RetentionMode, RetentionPolicy
 from ._session_store import PostgresSessionStore
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ __all__ = [
     "MigrationReport",
     "PostgresAGUIThreadSnapshotStore",
     "PostgresCheckpointStorage",
+    "PostgresClient",
     "PostgresDocumentStore",
     "PostgresHistoryProvider",
     "PostgresLeases",
@@ -66,6 +68,7 @@ __all__ = [
     "PostgresSettings",
     "PostgresStorageError",
     "PurgeReport",
+    "RetentionMode",
     "RetentionPolicy",
     "RevisionConflict",
     "TableNames",
