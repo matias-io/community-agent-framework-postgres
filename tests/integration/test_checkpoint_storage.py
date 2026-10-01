@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from agent_framework import Executor, WorkflowBuilder, WorkflowCheckpoint, WorkflowContext, handler
+from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowCheckpoint, WorkflowContext, handler
 from agent_framework.exceptions import WorkflowCheckpointException
 from psycopg import sql
 from psycopg.types.json import Jsonb
@@ -172,15 +172,24 @@ class _Finish(Executor):
         await ctx.yield_output(text + "!")
 
 
-async def test_a_real_workflow_checkpoints_and_resumes(storage: PostgresCheckpointStorage) -> None:
+def _build(storage: PostgresCheckpointStorage) -> Workflow:
     upper, finish = _Upper(id="upper"), _Finish(id="finish")
-    workflow = WorkflowBuilder(start_executor=upper, checkpoint_storage=storage).add_edge(upper, finish).build()
+    return WorkflowBuilder(start_executor=upper, checkpoint_storage=storage).add_edge(upper, finish).build()
+
+
+async def test_a_real_workflow_checkpoints_and_resumes(
+    storage: PostgresCheckpointStorage, client: ClientHandle, migrated: TableNames
+) -> None:
+    workflow = _build(storage)
     outputs = [event async for event in workflow.run("hello", stream=True)]
     assert any(getattr(event, "data", None) == "HELLO!" for event in outputs)
     checkpoints = await storage.list_checkpoints(workflow_name=workflow.name)
     assert checkpoints, "the run should have produced checkpoints"
-    resumed = [event async for event in workflow.run(checkpoint_id=checkpoints[-1].checkpoint_id, stream=True)]
-    assert resumed  # resuming from the last checkpoint runs without raising
+    # Another process: a new storage instance and a freshly built workflow, resuming from the first checkpoint.
+    fresh_storage = PostgresCheckpointStorage(application_id="tests", client=client.client, schema=migrated.schema)
+    fresh = _build(fresh_storage)
+    resumed = [event async for event in fresh.run(checkpoint_id=checkpoints[0].checkpoint_id, stream=True)]
+    assert any(getattr(event, "type", None) == "output" and event.data == "HELLO!" for event in resumed)
 
 
 async def test_checkpoint_messages_and_logs_name_no_ids(
