@@ -27,6 +27,7 @@ MAF does not export the three names below. Microsoft's own Cosmos DB and Redis p
 Every payload is stored as PostgreSQL `jsonb`, which changes a few values.
 
 - A string or key containing the NUL character (`\u0000`) cannot be stored. Every store refuses it with `ValueError` before any SQL runs.
+- A string or key containing a lone surrogate (for example `"\ud800"`) is not valid UTF-8. Every store refuses it with `ValueError` before any SQL runs.
 - A float of about `1e16` or more comes back as an `int`.
 - `-0.0` comes back as `0.0`.
 - `nan` and infinity are not JSON. Every store refuses them with `ValueError` before any SQL runs, as it does a circular reference or any value `json` cannot encode.

@@ -12,7 +12,7 @@ from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._json import encode_jsonb
 
 SECRET = "SECRETPAYLOAD"
-BAD_VALUES = [f"{SECRET}\x00", float("nan"), float("inf")]
+BAD_VALUES = [f"{SECRET}\x00", float("nan"), float("inf"), f"{SECRET}\ud800"]
 
 
 def test_encodes_once_and_passes_the_text_through() -> None:
@@ -32,6 +32,15 @@ def test_nul_is_refused_without_quoting_the_value(value: object) -> None:
         encode_jsonb(value, what="Payload")
     assert str(info.value) == "Payload contains a NUL character, which PostgreSQL JSONB cannot store."
     assert SECRET not in str(info.value)
+
+
+@pytest.mark.parametrize("value", [{"k": [f"x{SECRET}\ud800y"]}, {f"{SECRET}\udfff": 1}])
+def test_a_lone_surrogate_is_refused_without_quoting_the_value(value: object) -> None:
+    with pytest.raises(ValueError) as info:
+        encode_jsonb(value, what="Payload")
+    assert str(info.value) == "Payload contains a lone surrogate, which is not valid UTF-8 and PostgreSQL cannot store."
+    assert SECRET not in str(info.value)
+    assert info.value.__cause__ is None and info.value.__suppress_context__
 
 
 def _circular() -> dict[str, Any]:
@@ -99,4 +108,4 @@ async def test_every_store_refuses_before_any_sql(closed_hub: PostgresPersistenc
     with pytest.raises(ValueError) as info:
         await _writes(closed_hub, bad)[index]()
     assert SECRET not in str(info.value)
-    assert "NUL" in str(info.value) or "not JSON-serializable" in str(info.value)
+    assert any(reason in str(info.value) for reason in ("NUL", "not JSON-serializable", "lone surrogate"))

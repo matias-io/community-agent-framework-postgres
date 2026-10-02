@@ -16,11 +16,17 @@ def encode_jsonb(value: object, *, what: str) -> Jsonb:
     """Serialize ``value`` once and wrap the text for psycopg.
 
     Raises:
-        ValueError: ``value`` holds a NUL character, a non-finite float, a circular reference or
-            something ``json`` cannot encode. The message names ``what`` and never the value.
+        ValueError: ``value`` holds a NUL character, a lone surrogate, a non-finite float, a circular
+            reference or something ``json`` cannot encode. The message names ``what`` and never the value.
     """
     try:
         text = json.dumps(value, allow_nan=False, ensure_ascii=False)
+        # A lone surrogate survives json.dumps but not psycopg's UTF-8 encoding; fail here, before any SQL.
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(
+            f"{what} contains a lone surrogate, which is not valid UTF-8 and PostgreSQL cannot store."
+        ) from None
     except (ValueError, TypeError, RecursionError) as exc:
         raise ValueError(f"{what} is not JSON-serializable ({type(exc).__name__}).") from None
     if _NUL_ESCAPE.search(text):
