@@ -6,6 +6,7 @@ from agent_framework import Message
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
+from agent_framework_community_postgres import _framework
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._history_provider import PostgresHistoryProvider
 from agent_framework_community_postgres._retention import RetentionPolicy
@@ -54,8 +55,22 @@ async def test_undecodable_rows_are_skipped(
             ["tests", history.source_id, "s", Jsonb({"type": "message", "role": "user", "contents": 5})],
         )
     assert _texts(await history.get_messages("s")) == ["good"]
-    await history.save_messages("s", [Message(role="user", contents=["good"]), Message(role="user", contents=["next"])])
-    assert _texts(await history.get_messages("s")) == ["good", "next"]
+    await history.save_messages("s", [Message(role="assistant", contents=["reply"])])
+    assert _texts(await history.get_messages("s")) == ["good", "reply"]
+
+
+async def test_replay_rule_is_the_installed_maf_rule(history: PostgresHistoryProvider) -> None:
+    # MAF 1.20 keeps a repeated id-less input that 1.19 dropped as a replay; the provider follows the installed rule.
+    def stored() -> list[Message]:
+        return [Message(role="user", contents=["good"])]
+
+    def incoming() -> list[Message]:
+        return [Message(role="user", contents=["good"]), Message(role="user", contents=["next"])]
+
+    expected = _texts(stored() + _framework.filter_new_messages(stored(), incoming()))
+    await history.save_messages("s", stored())
+    await history.save_messages("s", incoming())
+    assert _texts(await history.get_messages("s")) == expected
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:
