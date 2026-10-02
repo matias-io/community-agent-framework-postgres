@@ -1,3 +1,6 @@
+import copy
+import dataclasses
+import pickle
 from datetime import timedelta
 
 import pytest
@@ -47,3 +50,36 @@ def test_purge_report_counts_are_a_read_only_copy() -> None:
     assert report.counts == {"af_documents": 1}
     with pytest.raises(TypeError):
         report.counts["af_documents"] = 2  # type: ignore[index]
+
+
+def test_purge_report_pickles_and_copies() -> None:
+    report = PurgeReport({"af_documents": 2, "af_sessions": 0})
+    for clone in (pickle.loads(pickle.dumps(report)), copy.deepcopy(report), copy.copy(report)):
+        assert clone == report
+        assert clone.total == 2
+        with pytest.raises(TypeError):
+            clone.counts["af_documents"] = 3  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda counts: counts.__setitem__("af_documents", 2),
+        lambda counts: counts.__delitem__("af_documents"),
+        lambda counts: counts.update({"af_sessions": 1}),
+        lambda counts: counts.pop("af_documents"),
+        lambda counts: counts.popitem(),
+        lambda counts: counts.setdefault("af_sessions", 1),
+        lambda counts: counts.clear(),
+    ],
+)
+def test_purge_report_counts_refuse_every_change(mutate: object) -> None:
+    report = PurgeReport({"af_documents": 1})
+    with pytest.raises(TypeError):
+        mutate(report.counts)  # type: ignore[operator]
+    assert report.counts == {"af_documents": 1}
+
+
+def test_purge_report_works_with_asdict() -> None:
+    assert dataclasses.asdict(PurgeReport({"af_documents": 1})) == {"counts": {"af_documents": 1}}
+    assert PurgeReport({"a": 1}) == PurgeReport({"a": 1}) != PurgeReport({"a": 2})

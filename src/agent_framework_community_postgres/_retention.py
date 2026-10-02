@@ -5,8 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
-from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from psycopg import AsyncConnection, sql
 
@@ -40,6 +39,28 @@ class RetentionPolicy:
         return self.ttl is not None
 
 
+class _ReadOnlyCounts(dict[str, int]):
+    """A ``dict`` that refuses changes: read-only like ``MappingProxyType``, yet it pickles and suits ``asdict``."""
+
+    __slots__ = ()
+
+    def _refuse(self, *args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("PurgeReport.counts is read-only.")
+
+    __setitem__ = _refuse
+    __delitem__ = _refuse
+    __ior__ = _refuse
+    clear = _refuse
+    pop = _refuse
+    popitem = _refuse
+    setdefault = _refuse  # pyright: ignore[reportAssignmentType]
+    update = _refuse  # pyright: ignore[reportAssignmentType]
+
+    def __reduce__(self) -> tuple[type[_ReadOnlyCounts], tuple[dict[str, int]]]:
+        # The default dict reduce refills the copy item by item, which this class refuses.
+        return (_ReadOnlyCounts, (dict(self),))
+
+
 @dataclass(frozen=True)
 class PurgeReport:
     """Rows affected per table by one purge; ``counts`` is a read-only copy. ``sum(reports)`` works."""
@@ -47,7 +68,7 @@ class PurgeReport:
     counts: Mapping[str, int] = field(default_factory=dict[str, int])
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "counts", MappingProxyType(dict(self.counts)))
+        object.__setattr__(self, "counts", _ReadOnlyCounts(self.counts))
 
     @property
     def total(self) -> int:
