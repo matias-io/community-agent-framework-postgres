@@ -9,6 +9,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from ._client import ClientHandle, PostgresClient
+from ._entra import EntraCredential
 from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
@@ -32,6 +33,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
         application_id: str,
         connection_string: str | SecretString | None = None,
         client: PostgresClient | ClientHandle | None = None,
+        credential: EntraCredential | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",
@@ -44,6 +46,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
             application_id=application_id,
             connection_string=connection_string,
             client=client,
+            credential=credential,
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             schema=schema,

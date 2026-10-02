@@ -11,11 +11,13 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 ```bash
 uv add community-agent-framework-postgres
 uv add "community-agent-framework-postgres[ag-ui]"  # adds PostgresAGUIThreadSnapshotStore
+uv add "community-agent-framework-postgres[azure]"  # adds Microsoft Entra ID sign-in
 pip install community-agent-framework-postgres
 pip install "community-agent-framework-postgres[ag-ui]"
+pip install "community-agent-framework-postgres[azure]"
 ```
 
-The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works. `from agent_framework_community_postgres import *` also needs the extra, because `__all__` lists that store.
+The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works. `from agent_framework_community_postgres import *` also needs the extra, because `__all__` lists that store. The `azure` extra installs `azure-identity` for [Microsoft Entra ID sign-in](#microsoft-entra-id-on-azure).
 
 On Windows, async psycopg cannot run on the default `ProactorEventLoop`. Run a script's entry point on a selector loop:
 
@@ -57,7 +59,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-Every store the hub creates borrows its pool and its `application_id`. It also takes the hub's `schema`, `table_prefix` and `retention` unless you pass your own to the factory. The factories raise `TypeError` if you pass `application_id` or `client`. `hub.purge()` covers every store, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
+Every store the hub creates borrows its pool and its `application_id`. It also takes the hub's `schema`, `table_prefix` and `retention` unless you pass your own to the factory. The factories raise `TypeError` if you pass `application_id`, `client` or `credential`. `hub.purge()` covers every store, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
 
 ## Use with Agent Framework
 
@@ -188,6 +190,7 @@ Every store and the hub take the same connection arguments.
 
 - `connection_string` or `client`. Pass exactly one. When both are absent, the connection string comes from `POSTGRES_CONNECTION_STRING`, read through MAF's `load_settings`. An explicit argument wins over the `.env` file named by `env_file_path`, which wins over the environment.
 - `client` is a psycopg `AsyncConnection` or `AsyncConnectionPool`. A pool that is not open is opened on first use. The package never closes a client it did not create.
+- `credential` signs the owned pool in to Azure Database for PostgreSQL with Microsoft Entra ID tokens. It needs a connection string and cannot be combined with `client`. See [Microsoft Entra ID on Azure](#microsoft-entra-id-on-azure).
 - A single `AsyncConnection` runs one call at a time. Every store and hub over it waits for the same lock, so a server should pass a pool. On a connection already inside your own transaction, each call becomes a savepoint, and transaction-scoped locks (the history save lock and the migration lock) are held until your transaction ends.
 - A connection string makes the store own a pool with `min_size=1`, `max_size=10`, autocommit, libpq `connect_timeout=10` unless the string sets one, and a pool `timeout` of 10 seconds.
 - `schema="public"` must be a lowercase identifier that does not start with `pg_`. `table_prefix="af_"` allows lowercase letters, digits and underscores, up to 35 bytes.
@@ -222,6 +225,22 @@ async def main() -> None:
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
     runner.run(main())
 ```
+
+## Microsoft Entra ID on Azure
+
+With the `azure` extra, pass an `azure-identity` credential as `credential=` and the owned pool signs in to Azure Database for PostgreSQL with a Microsoft Entra ID token for each new connection, instead of a password:
+
+```python
+from azure.identity.aio import DefaultAzureCredential
+
+hub = PostgresPersistence(
+    application_id="my-app",
+    connection_string="host=my-server.postgres.database.azure.com dbname=agent_framework user=ada@contoso.com",
+    credential=DefaultAzureCredential(),
+)
+```
+
+This is verified with a fake credential against PostgreSQL 16 and 17 and has not yet been run against an Azure server. [docs/azure-entra.md](docs/azure-entra.md) covers the server setup, managed identities, token lifetime and the CLI.
 
 ## Schema
 
@@ -274,6 +293,7 @@ Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests
 - [docs/documents-and-leases.md](docs/documents-and-leases.md) covers `PostgresDocumentStore` and `PostgresLeases`.
 - [docs/retention.md](docs/retention.md) covers `RetentionPolicy` and purging.
 - [docs/migrations.md](docs/migrations.md) covers `migrate()`, the CLI and SQL for a DBA.
+- [docs/azure-entra.md](docs/azure-entra.md) covers Microsoft Entra ID sign-in on Azure Database for PostgreSQL.
 - [docs/compatibility.md](docs/compatibility.md) covers versions, private imports, JSONB limits and Windows.
 
 Runnable scripts for each store are in `samples/`.

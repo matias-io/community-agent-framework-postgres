@@ -8,13 +8,17 @@ import weakref
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
 
 from agent_framework import SecretString, load_settings
 from agent_framework.exceptions import IntegrationException
 from psycopg import AsyncConnection, Error, sql
 from psycopg.conninfo import conninfo_to_dict
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
+
+if TYPE_CHECKING:
+    # _entra imports this module's error type, so it is imported where a pool is built.
+    from ._entra import EntraCredential
 
 PostgresClient: TypeAlias = AsyncConnection[Any] | AsyncConnectionPool[AsyncConnection[Any]]
 
@@ -126,11 +130,25 @@ class TableNames:
 
 
 class ClientHandle:
-    """Own a lazily opened pool, or borrow a caller's pool or connection without closing it."""
+    """Own a lazily opened pool, or borrow a caller's pool or connection without closing it.
 
-    def __init__(self, connection_string: SecretString | None, client: PostgresClient | None) -> None:
+    With ``credential``, the owned pool signs in to Azure Database for PostgreSQL with a Microsoft
+    Entra ID token per new connection (see ``_entra``).
+    """
+
+    def __init__(
+        self,
+        connection_string: SecretString | None,
+        client: PostgresClient | None,
+        *,
+        credential: EntraCredential | None = None,
+    ) -> None:
         if (connection_string is None) == (client is None):
             raise ValueError("Supply exactly one of connection_string or client.")
+        if credential is not None and client is not None:
+            raise ValueError(
+                "credential cannot be combined with client; a pool or connection you pass signs in itself."
+            )
         if client is not None and not isinstance(client, (AsyncConnection, AsyncConnectionPool)):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("client must be a psycopg AsyncConnection or AsyncConnectionPool.")
         self.owned = client is None
@@ -147,8 +165,14 @@ class ClientHandle:
             kwargs: dict[str, Any] = {"autocommit": True}
             if "connect_timeout" not in options:
                 kwargs["connect_timeout"] = _CONNECT_TIMEOUT_SECONDS
+            connection_class: type[AsyncConnection[Any]] = AsyncConnection
+            if credential is not None:
+                from ._entra import entra_connection_class
+
+                connection_class = entra_connection_class(credential)
             self.client = AsyncConnectionPool(
                 conninfo,
+                connection_class=connection_class,
                 open=False,
                 min_size=1,
                 max_size=10,
@@ -235,13 +259,19 @@ def create_client(
     client: PostgresClient | ClientHandle | None,
     env_file_path: str | None,
     env_file_encoding: str | None,
+    credential: EntraCredential | None = None,
 ) -> ClientHandle:
     """Resolve the connection the way every store does: explicit argument, ``.env`` file, environment.
 
     A ``ClientHandle`` (how ``PostgresPersistence`` shares its pool) is borrowed as a child handle, so
-    closing the handle it came from stops this one too.
+    closing the handle it came from stops this one too. ``credential`` signs the owned pool in with
+    Microsoft Entra ID and needs a connection string, not a client.
     """
     if client is not None:
+        if credential is not None:
+            raise ValueError(
+                "credential cannot be combined with client; a pool or connection you pass signs in itself."
+            )
         if connection_string is not None or env_file_path is not None or env_file_encoding is not None:
             raise ValueError("client cannot be combined with connection_string, env_file_path or env_file_encoding.")
         if isinstance(client, ClientHandle):
@@ -258,4 +288,4 @@ def create_client(
     resolved = settings.get("connection_string")
     if not isinstance(resolved, SecretString):
         raise TypeError("connection_string must be a string or SecretString.")
-    return ClientHandle(resolved, None)
+    return ClientHandle(resolved, None, credential=credential)

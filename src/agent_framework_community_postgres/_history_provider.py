@@ -10,6 +10,7 @@ from agent_framework import HistoryProvider, Message, SecretString
 from psycopg import AsyncConnection, sql
 
 from ._client import ClientHandle, PostgresClient, optional_text, require_text
+from ._entra import EntraCredential
 from ._framework import filter_new_messages
 from ._json import encode_jsonb
 from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
@@ -49,6 +50,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
         store_outputs: bool = True,
         connection_string: str | SecretString | None = None,
         client: PostgresClient | ClientHandle | None = None,
+        credential: EntraCredential | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",
@@ -69,6 +71,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             application_id=application_id,
             connection_string=connection_string,
             client=client,
+            credential=credential,
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             schema=schema,

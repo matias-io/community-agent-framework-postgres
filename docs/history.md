@@ -31,7 +31,7 @@ PostgresHistoryProvider(source_id="postgres_history", *, application_id, ...)
 | `max_messages` | `None` | `None` keeps everything, `0` writes nothing, `n` keeps the newest `n` per session. A negative value raises `ValueError` |
 | `load_messages`, `store_inputs`, `store_context_messages`, `store_context_from`, `store_outputs` | as in `HistoryProvider` | Passed to MAF unchanged |
 
-The connection arguments (`connection_string`, `client`, `env_file_path`, `env_file_encoding`, `schema`, `table_prefix`) and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use).
+The connection arguments (`connection_string`, `client`, `credential`, `env_file_path`, `env_file_encoding`, `schema`, `table_prefix`) and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use).
 
 The key follows `RedisHistoryProvider`. These ids select rows. They do not authorize anyone, so bind them to the signed-in user or tenant in your application.
 

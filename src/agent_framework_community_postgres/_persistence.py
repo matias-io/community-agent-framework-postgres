@@ -10,6 +10,7 @@ from psycopg import sql
 from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
 from ._document_store import PostgresDocumentStore
+from ._entra import EntraCredential
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
 from ._migrations import MigrationReport, migrate, pending_versions
@@ -19,8 +20,9 @@ from ._session_store import PostgresSessionStore
 if TYPE_CHECKING:
     from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
-# A store with another application id would escape the hub's purge; another client would escape its close.
-_HUB_OWNED = ("application_id", "client")
+# A store with another application id would escape the hub's purge; another client or credential would
+# escape its pool and its close.
+_HUB_OWNED = ("application_id", "client", "credential")
 
 
 class PostgresPersistence:
@@ -28,7 +30,8 @@ class PostgresPersistence:
 
     Enter it (``async with``) or call ``open()`` to open the pool up front; otherwise the
     pool opens on first use. Stores it creates borrow the pool and never close it, and
-    once the hub is closed they refuse to run.
+    once the hub is closed they refuse to run. With ``credential``, the pool signs in to Azure
+    Database for PostgreSQL with Microsoft Entra ID tokens.
     """
 
     def __init__(
@@ -37,6 +40,7 @@ class PostgresPersistence:
         application_id: str,
         connection_string: str | SecretString | None = None,
         client: PostgresClient | None = None,
+        credential: EntraCredential | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",
@@ -47,7 +51,11 @@ class PostgresPersistence:
         self.names = TableNames(schema=schema, prefix=table_prefix)
         self.retention = retention or RetentionPolicy()
         self._client = create_client(
-            connection_string, client=client, env_file_path=env_file_path, env_file_encoding=env_file_encoding
+            connection_string,
+            client=client,
+            env_file_path=env_file_path,
+            env_file_encoding=env_file_encoding,
+            credential=credential,
         )
 
     @property

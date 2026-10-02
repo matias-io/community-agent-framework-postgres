@@ -14,6 +14,7 @@ from agent_framework import SecretString
 from psycopg import sql
 
 from ._client import ClientHandle, LeaseLost, LeaseUnavailable, PostgresClient, require_text
+from ._entra import EntraCredential
 from ._retention import RetentionPolicy
 from ._store import BaseStore
 
@@ -61,6 +62,7 @@ class PostgresLeases(BaseStore):
         application_id: str,
         connection_string: str | SecretString | None = None,
         client: PostgresClient | ClientHandle | None = None,
+        credential: EntraCredential | None = None,
         env_file_path: str | None = None,
         env_file_encoding: str | None = None,
         schema: str = "public",
@@ -70,6 +72,7 @@ class PostgresLeases(BaseStore):
             application_id=application_id,
             connection_string=connection_string,
             client=client,
+            credential=credential,
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             schema=schema,

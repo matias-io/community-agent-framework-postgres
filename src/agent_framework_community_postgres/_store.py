@@ -14,6 +14,7 @@ from ._client import (
     create_client,
     require_text,
 )
+from ._entra import EntraCredential
 from ._retention import RetentionPolicy
 
 
@@ -24,6 +25,7 @@ class BaseStore:
         application_id: str,
         connection_string: str | SecretString | None,
         client: PostgresClient | ClientHandle | None,
+        credential: EntraCredential | None = None,
         env_file_path: str | None,
         env_file_encoding: str | None,
         schema: str,
@@ -33,7 +35,11 @@ class BaseStore:
         self.application_id = require_text(application_id, "application_id")
         self._names = TableNames(schema=schema, prefix=table_prefix)
         self._client: ClientHandle = create_client(
-            connection_string, client=client, env_file_path=env_file_path, env_file_encoding=env_file_encoding
+            connection_string,
+            client=client,
+            env_file_path=env_file_path,
+            env_file_encoding=env_file_encoding,
+            credential=credential,
         )
         self._retention = retention or RetentionPolicy()
 

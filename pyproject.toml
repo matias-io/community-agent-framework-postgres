@@ -27,6 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ag-ui = ["agent-framework-ag-ui>=1.4.0,<2"]
+azure = ["azure-identity>=1.19,<2"]
 
 [project.urls]
 Source = "https://github.com/matias-io/community-agent-framework-postgres"
@@ -41,6 +42,7 @@ dev = [
   "ruff>=0.14",
   "pyright>=1.1.400",
   "agent-framework-ag-ui>=1.4.0,<2",
+  "azure-identity>=1.19,<2",
 ]
 
 [build-system]
