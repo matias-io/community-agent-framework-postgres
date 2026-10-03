@@ -2,7 +2,7 @@
 
 Pass `credential=` and the pool this package creates signs in to Azure Database for PostgreSQL with a Microsoft Entra ID token instead of a password. It plays the role of the `credential=` argument on Microsoft's Cosmos DB integration and follows Microsoft's documented psycopg 3 pattern: a connection class whose `connect` fetches a token and passes it as the password.
 
-Verified with a fake credential against PostgreSQL 16 and 17; not yet run against an Azure server.
+Verified with a fake credential against PostgreSQL 17 locally; the CI matrix runs the same tests on PostgreSQL 16 and 17. No real Azure server has been used yet.
 
 ## Prerequisites
 

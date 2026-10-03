@@ -79,3 +79,24 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together. Dependabot (`.github/dependabot.yml`) checks the pins weekly and opens a pull request that does both.
 
 `ci.yml` runs the suite on every Python and PostgreSQL version, once on the locked MAF versions and once on the newest MAF release the declared ranges allow. Both legs block a merge. `canary.yml` runs every Monday against the newest MAF release, ignoring the untested-version warning. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and publishes only if that passes.
+
+## Releasing
+
+A release goes to PyPI from a tag, through `release.yml`. A version on PyPI can never be uploaded again, even after it is deleted, so check everything before the tag is pushed.
+
+One-time setup:
+
+1. On PyPI, add a pending trusted publisher for the project `community-agent-framework-postgres`: owner `matias-io`, repository `community-agent-framework-postgres`, workflow `release.yml`, environment `pypi`. After the first upload it becomes the project's trusted publisher.
+2. On GitHub, create the environment `pypi` under Settings, Environments. Adding yourself as a required reviewer makes every publish wait for approval.
+
+For each release:
+
+1. On the release branch, set `project.version` in `pyproject.toml`, add the version's section and link reference to `CHANGELOG.md`, update the tested versions in `_framework.py` and `docs/compatibility.md`, and point the README's links at the new tag (`blob/vX.Y.Z/`); `tests/unit/test_docs.py` checks the tag matches `project.version`.
+2. Push the branch and open a pull request against `main`.
+3. Wait for the full CI matrix to pass, including PostgreSQL 16 and the `latest` MAF leg.
+4. Merge the pull request.
+5. Create an annotated tag on the merge commit that matches `project.version`, for example `git tag -a v0.1.1 -m "v0.1.1"`.
+6. Push the tag: `git push origin v0.1.1`. This starts `release.yml`, which checks the tag against `project.version`, runs the full suite against PostgreSQL 17, builds, and publishes.
+7. Open the project page on PyPI and check the README renders: links resolve to the tag on GitHub, and the tables display.
+
+Optional dry run on TestPyPI before step 6: register the same pending publisher on test.pypi.org, then build locally with `uv build` and upload with `uv publish --publish-url https://test.pypi.org/legacy/` using a TestPyPI token, or add a job with `repository-url: https://test.pypi.org/legacy/` to the publish action. A version on TestPyPI cannot be reused either.

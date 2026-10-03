@@ -4,7 +4,7 @@ PostgreSQL storage for Microsoft Agent Framework (MAF). The package provides `Po
 
 ## Status
 
-Alpha. Public names and constructor arguments may change in a 0.x minor release, and `CHANGELOG.md` lists every such change. Schema changes ship as new numbered migrations, so `migrate()` upgrades an existing database in place.
+Alpha. Public names and constructor arguments may change in a 0.x minor release, and the [changelog](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/CHANGELOG.md) lists every such change. Schema changes ship as new numbered migrations, so `migrate()` upgrades an existing database in place.
 
 ## Compatibility
 
@@ -16,7 +16,7 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 | PostgreSQL | | 16, 17 |
 | psycopg | `>=3.3.5,<4` | 3.3.5 or later, below 4 |
 
-With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](docs/compatibility.md) for the support policy and how to silence it. 0.1.0 was tagged on GitHub but never published to PyPI.
+With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) for the support policy and how to silence it. 0.1.0 was tagged on GitHub but never published to PyPI.
 
 ## What it implements
 
@@ -114,7 +114,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-Pass the checkpoint storage to `WorkflowBuilder`. The workflow then writes checkpoints you can resume from. [docs/checkpoints.md](docs/checkpoints.md) has the full example.
+Pass the checkpoint storage to `WorkflowBuilder`. The workflow then writes checkpoints you can resume from. [docs/checkpoints.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/checkpoints.md) has the full example.
 
 ```python
 import asyncio
@@ -173,7 +173,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-In an agent, create the new session with `agent.create_session(session_id=...)` instead of `AgentSession(...)`. See [docs/history.md](docs/history.md) and [docs/sessions.md](docs/sessions.md).
+In an agent, create the new session with `agent.create_session(session_id=...)` instead of `AgentSession(...)`. See [docs/history.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/history.md) and [docs/sessions.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/sessions.md).
 
 ## Standalone use
 
@@ -270,7 +270,7 @@ async def main() -> None:
 
 A failing credential raises `PostgresStorageError` naming its error on the first call. A managed identity or a service principal has no user name in its token, so set `user=` to its database role.
 
-This is verified with a fake credential against PostgreSQL 16 and 17 and has not yet been run against an Azure server. [docs/azure-entra.md](docs/azure-entra.md) covers the server setup, managed identities, token lifetime and the CLI.
+This is verified with a fake credential against PostgreSQL 17 locally, and the CI matrix runs the same tests on PostgreSQL 16 and 17. No real Azure server has been used yet. [docs/azure-entra.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/azure-entra.md) covers the server setup, managed identities, token lifetime and the CLI.
 
 ## Schema
 
@@ -288,11 +288,11 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 
 ## Retention
 
-Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. See [docs/retention.md](docs/retention.md).
+Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
 
 ## Private Agent Framework imports
 
-The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](docs/compatibility.md).
+The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md).
 
 ## Development
 
@@ -306,22 +306,22 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped. See `CONTRIBUTING.md`.
+Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped. See [CONTRIBUTING.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/CONTRIBUTING.md).
 
 ## Documentation
 
-- [docs/history.md](docs/history.md) covers `PostgresHistoryProvider`.
-- [docs/sessions.md](docs/sessions.md) covers `PostgresSessionStore`.
-- [docs/checkpoints.md](docs/checkpoints.md) covers `PostgresCheckpointStorage`.
-- [docs/thread-snapshots.md](docs/thread-snapshots.md) covers `PostgresAGUIThreadSnapshotStore`.
-- [docs/documents-and-leases.md](docs/documents-and-leases.md) covers `PostgresDocumentStore` and `PostgresLeases`.
-- [docs/retention.md](docs/retention.md) covers `RetentionPolicy` and purging.
-- [docs/migrations.md](docs/migrations.md) covers `migrate()`, the CLI and SQL for a DBA.
-- [docs/azure-entra.md](docs/azure-entra.md) covers Microsoft Entra ID sign-in on Azure Database for PostgreSQL.
-- [docs/compatibility.md](docs/compatibility.md) covers versions, private imports, JSONB limits and Windows.
+- [docs/history.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/history.md) covers `PostgresHistoryProvider`.
+- [docs/sessions.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/sessions.md) covers `PostgresSessionStore`.
+- [docs/checkpoints.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/checkpoints.md) covers `PostgresCheckpointStorage`.
+- [docs/thread-snapshots.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/thread-snapshots.md) covers `PostgresAGUIThreadSnapshotStore`.
+- [docs/documents-and-leases.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/documents-and-leases.md) covers `PostgresDocumentStore` and `PostgresLeases`.
+- [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md) covers `RetentionPolicy` and purging.
+- [docs/migrations.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/migrations.md) covers `migrate()`, the CLI and SQL for a DBA.
+- [docs/azure-entra.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/azure-entra.md) covers Microsoft Entra ID sign-in on Azure Database for PostgreSQL.
+- [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) covers versions, private imports, JSONB limits and Windows.
 
-Runnable scripts for each store are in `samples/`.
+Runnable scripts for each store are in [samples/](https://github.com/matias-io/community-agent-framework-postgres/tree/v0.1.1/samples).
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/LICENSE).
