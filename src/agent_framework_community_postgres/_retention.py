@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, Self, cast
 
 from psycopg import AsyncConnection, sql
 
@@ -39,26 +39,49 @@ class RetentionPolicy:
         return self.ttl is not None
 
 
-class _ReadOnlyCounts(dict[str, int]):
-    """A ``dict`` that refuses changes: read-only like ``MappingProxyType``, yet it pickles and suits ``asdict``."""
+class _ReadOnlyCounts(Mapping[str, int]):
+    """A read-only mapping over a private ``dict``; unlike a ``dict`` subclass, no ``dict`` method can change it.
 
-    __slots__ = ()
+    It is built in ``__new__``, so calling ``__init__`` again changes nothing. ``deepcopy`` returns a plain
+    ``dict``, which is what ``dataclasses.asdict`` puts under ``counts``; ``PurgeReport`` copies itself through
+    its own ``__reduce__``, so a copied report stays read-only.
+    """
 
-    def _refuse(self, *args: object, **kwargs: object) -> NoReturn:
+    __slots__ = ("_data",)
+    _data: dict[str, int]
+
+    def __new__(cls, data: Mapping[str, int]) -> Self:
+        self = super().__new__(cls)
+        object.__setattr__(self, "_data", dict(data))
+        return self
+
+    def __setattr__(self, name: str, value: object) -> NoReturn:
         raise TypeError("PurgeReport.counts is read-only.")
 
-    __setitem__ = _refuse
-    __delitem__ = _refuse
-    __ior__ = _refuse
-    clear = _refuse
-    pop = _refuse
-    popitem = _refuse
-    setdefault = _refuse  # pyright: ignore[reportAssignmentType]
-    update = _refuse  # pyright: ignore[reportAssignmentType]
+    def __getitem__(self, key: str) -> int:
+        return self._data[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return repr(self._data)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Mapping):
+            return self._data == dict(cast("Mapping[object, object]", other))
+        return NotImplemented
+
+    __hash__ = None  # type: ignore[assignment]  # equal to a dict, so unhashable like one
 
     def __reduce__(self) -> tuple[type[_ReadOnlyCounts], tuple[dict[str, int]]]:
-        # The default dict reduce refills the copy item by item, which this class refuses.
-        return (_ReadOnlyCounts, (dict(self),))
+        return (_ReadOnlyCounts, (dict(self._data),))
+
+    def __deepcopy__(self, memo: dict[int, object]) -> dict[str, int]:
+        return dict(self._data)
 
 
 @dataclass(frozen=True)
@@ -69,6 +92,10 @@ class PurgeReport:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "counts", _ReadOnlyCounts(self.counts))
+
+    def __reduce__(self) -> tuple[type[PurgeReport], tuple[dict[str, int]]]:
+        # Pickle, copy and deepcopy rebuild the report from a plain dict, so the copy is read-only too.
+        return (PurgeReport, (dict(self.counts),))
 
     @property
     def total(self) -> int:

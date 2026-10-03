@@ -40,7 +40,7 @@ A purge acts on rows whose `expires_at` has passed.
 
 A tombstone keeps the ids, timestamps, revision and metadata and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again.
 
-`purge()` returns a `PurgeReport`. `report.counts` maps each table name to the rows it changed, and `report.total` is the sum.
+`purge()` returns a `PurgeReport`. `report.counts` maps each table name to the rows it changed, and `report.total` is the sum. `counts` is a read-only mapping, not a `dict`; `dict(report.counts)` gives a copy you can change. A report pickles, copies and works with `dataclasses.asdict`.
 
 ## Scope of a purge
 

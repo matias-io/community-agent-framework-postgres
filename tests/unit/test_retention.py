@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import pickle
+from collections.abc import Mapping
 from datetime import timedelta
 
 import pytest
@@ -75,9 +76,42 @@ def test_purge_report_pickles_and_copies() -> None:
 )
 def test_purge_report_counts_refuse_every_change(mutate: object) -> None:
     report = PurgeReport({"af_documents": 1})
-    with pytest.raises(TypeError):
+    with pytest.raises((TypeError, AttributeError)):  # no mutators at all, as on a MappingProxyType
         mutate(report.counts)  # type: ignore[operator]
     assert report.counts == {"af_documents": 1}
+
+
+@pytest.mark.parametrize(
+    "bypass",
+    [
+        lambda counts: dict.__setitem__(counts, "af_documents", 2),
+        lambda counts: dict.update(counts, {"af_sessions": 1}),
+        lambda counts: dict.clear(counts),
+        lambda counts: setattr(counts, "_data", {"af_sessions": 1}),
+    ],
+)
+def test_purge_report_counts_refuse_dict_bypasses(bypass: object) -> None:
+    report = PurgeReport({"af_documents": 1})
+    with pytest.raises(TypeError):
+        bypass(report.counts)  # type: ignore[operator]
+    assert report.counts == {"af_documents": 1}
+
+
+def test_calling_init_again_changes_nothing() -> None:
+    report = PurgeReport({"af_documents": 1})
+    report.counts.__init__({"af_sessions": 9})  # type: ignore[misc]
+    assert report.counts == {"af_documents": 1}
+
+
+def test_purge_report_counts_is_a_mapping_not_a_dict() -> None:
+    report = PurgeReport({"af_documents": 1})
+    assert isinstance(report.counts, Mapping)
+    assert not isinstance(report.counts, dict)
+    assert dict(report.counts) == {"af_documents": 1}
+    assert len(report.counts) == 1 and list(report.counts) == ["af_documents"]
+    assert repr(report) == "PurgeReport(counts={'af_documents': 1})"
+    assert report.counts != {"af_documents": 2}
+    assert type(dataclasses.asdict(report)["counts"]) is dict
 
 
 def test_purge_report_works_with_asdict() -> None:
