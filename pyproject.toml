@@ -1,6 +1,6 @@
 [project]
 name = "community-agent-framework-postgres"
-version = "0.1.0"
+version = "0.1.1"
 description = "PostgreSQL storage for Microsoft Agent Framework: chat history, sessions, workflow checkpoints, AG-UI thread snapshots, documents and leases."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,12 +21,12 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "agent-framework-core>=1.19.0,<2",
+  "agent-framework-core>=1.19.0,<1.21",
   "psycopg[binary,pool]>=3.3.5,<4",
 ]
 
 [project.optional-dependencies]
-ag-ui = ["agent-framework-ag-ui>=1.4.0,<2"]
+ag-ui = ["agent-framework-ag-ui>=1.4.0,<1.6"]
 azure = ["azure-identity>=1.19,<2"]
 
 [project.urls]
@@ -41,7 +41,7 @@ dev = [
   "pytest-timeout>=2.3",
   "ruff>=0.14",
   "pyright>=1.1.400",
-  "agent-framework-ag-ui>=1.4.0,<2",
+  "agent-framework-ag-ui>=1.4.0,<1.6",
   "azure-identity>=1.19,<2",
 ]
 

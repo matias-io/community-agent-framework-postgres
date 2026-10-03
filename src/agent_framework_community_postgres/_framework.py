@@ -4,12 +4,16 @@ Microsoft's own Cosmos DB and Redis packages import these same names from the
 same private modules. Keeping them here means an upstream rename breaks one
 file, and ``tests/unit/test_framework.py`` fails before a user notices.
 
-Verified against agent-framework-core 1.19.0 on 30 September 2026.
+Verified against agent-framework-core 1.19.0 and 1.20.0 on 2 October 2026.
+Their signatures did not change, but 1.20 changed ``filter_new_messages``: when
+the stored history is one user message without an id, an incoming batch that
+starts with that same message is kept as a repeated input instead of dropped as
+a replay. ``PostgresHistoryProvider`` follows whichever rule is installed.
 """
 
 from importlib.metadata import PackageNotFoundError, version
 
-SUPPORTED_CORE = ">=1.19.0,<2"
+SUPPORTED_CORE = ">=1.19.0,<1.21"
 
 
 def installed_core_version() -> str:

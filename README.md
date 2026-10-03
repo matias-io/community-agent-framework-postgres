@@ -6,6 +6,31 @@ PostgreSQL storage for Microsoft Agent Framework (MAF). The package provides `Po
 
 Alpha. Public names and constructor arguments may change in a 0.x minor release, and `CHANGELOG.md` lists every such change. Schema changes ship as new numbered migrations, so `migrate()` upgrades an existing database in place.
 
+## Compatibility
+
+| | Supported in 0.1.1 |
+|---|---|
+| `agent-framework-core` | 1.19.x to 1.20.x (`>=1.19.0,<1.21`) |
+| `agent-framework-ag-ui` | 1.4.x to 1.5.x (`>=1.4.0,<1.6`), through the `ag-ui` extra |
+| Python | 3.11 to 3.14 |
+| Python 3.15 | Smoke-tested on 3.15.0b4, not yet supported |
+| PostgreSQL | 16, 17 |
+| psycopg | 3.3 and later (`>=3.3.5,<4`) |
+
+The MAF bounds are the tested range, and a patch release widens them after a new MAF minor passes CI. See [docs/compatibility.md](docs/compatibility.md) for the support policy.
+
+## What it implements
+
+| Class | MAF interface | Extra | Conditions |
+|---|---|---|---|
+| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with the installed MAF's own rule, which changed in 1.20 |
+| `PostgresSessionStore` | `SessionStore` | none | MAF marks `SessionStore` experimental |
+| `PostgresCheckpointStorage` | `CheckpointStorage` | none | Decodes only MAF's safe types and its own; `allowed_checkpoint_types` adds more |
+| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store` |
+| `PostgresDocumentStore`, `PostgresLeases` | none (this package's own) | none | |
+| `PostgresPersistence` | none (creates the stores above over one pool) | none | |
+| Microsoft Entra ID sign-in (`credential=`) | none | `azure` | Azure Database for PostgreSQL with Entra authentication |
+
 ## Install
 
 ```bash
@@ -259,12 +284,6 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 ## Retention
 
 Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. See [docs/retention.md](docs/retention.md).
-
-## Compatibility
-
-| Package | agent-framework-core | agent-framework-ag-ui | Python | PostgreSQL |
-|---|---|---|---|---|
-| 0.1.0 | >=1.19.0,<2 | >=1.4.0,<2 (extra) | 3.11 to 3.14 | 16, 17 |
 
 ## Private Agent Framework imports
 

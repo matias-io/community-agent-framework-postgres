@@ -385,7 +385,7 @@ wheels = [
 
 [[package]]
 name = "community-agent-framework-postgres"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "agent-framework-core" },
@@ -413,8 +413,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agent-framework-ag-ui", marker = "extra == 'ag-ui'", specifier = ">=1.4.0,<2" },
-    { name = "agent-framework-core", specifier = ">=1.19.0,<2" },
+    { name = "agent-framework-ag-ui", marker = "extra == 'ag-ui'", specifier = ">=1.4.0,<1.6" },
+    { name = "agent-framework-core", specifier = ">=1.19.0,<1.21" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.19,<2" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.5,<4" },
 ]
@@ -422,7 +422,7 @@ provides-extras = ["ag-ui", "azure"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "agent-framework-ag-ui", specifier = ">=1.4.0,<2" },
+    { name = "agent-framework-ag-ui", specifier = ">=1.4.0,<1.6" },
     { name = "azure-identity", specifier = ">=1.19,<2" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },

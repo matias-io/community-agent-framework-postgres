@@ -1,6 +1,7 @@
 import importlib
 import uuid
 from datetime import UTC, datetime
+from importlib.metadata import requires
 
 import agent_framework._sessions as sessions_module
 import pytest
@@ -13,7 +14,14 @@ def test_private_names_are_present() -> None:
     assert callable(_framework.filter_new_messages)
     assert callable(_framework.encode_checkpoint_value)
     assert callable(_framework.decode_checkpoint_value)
-    assert _framework.SUPPORTED_CORE == ">=1.19.0,<2"
+    assert _framework.SUPPORTED_CORE == ">=1.19.0,<1.21"
+
+
+def test_supported_core_matches_the_declared_dependency() -> None:
+    declared = [r for r in requires("community-agent-framework-postgres") or [] if r.startswith("agent-framework-core")]
+    assert len(declared) == 1
+    specifiers = declared[0].removeprefix("agent-framework-core").replace(" ", "").split(",")
+    assert sorted(specifiers) == sorted(_framework.SUPPORTED_CORE.split(","))
 
 
 def test_checkpoint_encoding_round_trips_non_json_values() -> None:
@@ -37,7 +45,7 @@ def test_a_missing_private_name_is_named_in_the_import_error(monkeypatch: pytest
         with pytest.raises(ImportError) as info:
             importlib.reload(_framework)
         assert "filter_new_messages" in str(info.value)
-        assert ">=1.19.0,<2" in str(info.value)
+        assert ">=1.19.0,<1.21" in str(info.value)
     finally:
         monkeypatch.undo()
         importlib.reload(_framework)

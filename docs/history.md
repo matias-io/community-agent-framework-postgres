@@ -40,7 +40,7 @@ The key follows `RedisHistoryProvider`. These ids select rows. They do not autho
 - `session_id` must be a non-empty `str`. `None` or `''` raises `ValueError`.
 - `save_messages` takes a transaction-scoped advisory lock on the session before it reads, so concurrent saves of the same turn store it once. On a connection already inside your own transaction, that lock is held until your transaction ends.
 - A single `AsyncConnection` runs one call at a time across every store that uses it, so a server should pass a pool.
-- A replayed transcript is deduplicated with MAF's `filter_new_messages`. Only the messages after the stored ones are inserted.
+- A replayed transcript is deduplicated with MAF's `filter_new_messages`. Only the messages after the stored ones are inserted. The rule is the installed MAF's, and it changed in 1.20; see [compatibility.md](compatibility.md#support-policy).
 - A row that is not a JSON object or fails `Message.from_dict` is skipped with a warning on the `agent_framework_community_postgres._history_provider` logger.
 - `list_sessions()` returns the session ids under this provider's application, tenant, agent and source, sorted.
 - `clear(session_id)` deletes one session's rows.
