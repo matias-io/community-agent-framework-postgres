@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Every action in .github/workflows is pinned by commit SHA with its tag in a comment.
+  # Dependabot keeps those pins current: it opens a pull request that changes the SHA and the comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

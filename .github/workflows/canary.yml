@@ -3,6 +3,8 @@ name: Canary
 # Weekly run against the newest MAF releases, past this package's upper bound, so a new MAF minor fails here before users hit the bound.
 
 on:
+  # GitHub disables scheduled workflows after 60 days without repository activity; re-enable this one in the
+  # Actions tab if that happens.
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
@@ -37,4 +39,6 @@ jobs:
       - run: uv pip install --upgrade agent-framework-core agent-framework-ag-ui
       - run: uv pip show agent-framework-core agent-framework-ag-ui
       - run: uv run --no-sync python -c "import sys; print(sys.version)"
-      - run: uv run --no-sync pytest -v
+      # A MAF minor newer than the tested ones makes the package warn at import, and filterwarnings = error
+      # would turn that into a failure; the canary exists to run exactly those versions.
+      - run: uv run --no-sync pytest -v -W "ignore:community-agent-framework-postgres has not been tested"

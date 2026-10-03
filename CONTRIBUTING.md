@@ -76,6 +76,6 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 
 ## GitHub Actions
 
-Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together.
+Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together. Dependabot (`.github/dependabot.yml`) checks the pins weekly and opens a pull request that does both.
 
-`ci.yml` runs the suite on every Python and PostgreSQL version, once on the locked MAF versions and once on the newest MAF release the declared ranges allow. Both legs block a merge. `canary.yml` runs every Monday against the newest MAF release, past the declared upper bound. When it fails, a new MAF minor needs work before a patch release widens the bound.
+`ci.yml` runs the suite on every Python and PostgreSQL version, once on the locked MAF versions and once on the newest MAF release the declared ranges allow. Both legs block a merge. `canary.yml` runs every Monday against the newest MAF release, past the declared upper bound. When it fails, a new MAF minor needs work before a patch release widens the bound. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and publishes only if that passes.

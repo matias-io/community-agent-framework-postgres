@@ -10,6 +10,20 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The full suite, integration tests included, must pass before anything is built or published.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_framework
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_framework"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -21,7 +35,7 @@ jobs:
             exit 1
           fi
       - run: uv sync --all-extras
-      - run: uv run pytest tests/unit
+      - run: uv run pytest -v
       - run: uv build
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
