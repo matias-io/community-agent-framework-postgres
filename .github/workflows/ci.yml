@@ -56,12 +56,16 @@ jobs:
       # Latest: re-resolve the two MAF packages to the newest release the
       # declared ranges allow, then sync that lock into the same .venv the
       # test step runs in. `uv run` below keeps the upgraded lock. The ranges
-      # are the supported range, so this leg blocks a merge; canary.yml
-      # tests releases beyond them.
+      # are the supported range, so this leg blocks a merge. A minor newer
+      # than the tested ones warns at import; this leg ignores that warning
+      # (it tests behaviour), while the pinned leg keeps it an error.
       - if: matrix.maf == 'latest'
         run: |
           uv lock --upgrade-package agent-framework-core --upgrade-package agent-framework-ag-ui
           uv sync --all-extras
       - run: uv pip show agent-framework-core agent-framework-ag-ui
       - run: uv run --python ${{ matrix.python }} python -c "import sys; print(sys.version)"
-      - run: uv run --python ${{ matrix.python }} pytest -v
+      - if: matrix.maf == 'pinned'
+        run: uv run --python ${{ matrix.python }} pytest -v
+      - if: matrix.maf == 'latest'
+        run: uv run --python ${{ matrix.python }} pytest -v -W "ignore:community-agent-framework-postgres has not been tested"

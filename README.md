@@ -8,25 +8,24 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 
 ## Compatibility
 
-| | Supported in 0.1.1 |
-|---|---|
-| `agent-framework-core` | 1.19.x to 1.20.x (`>=1.19.0,<1.21`) |
-| `agent-framework-ag-ui` | 1.4.x to 1.5.x (`>=1.4.0,<1.6`), through the `ag-ui` extra |
-| Python | 3.11 to 3.14 |
-| Python 3.15 | Smoke-tested on 3.15.0b4, not yet supported |
-| PostgreSQL | 16, 17 |
-| psycopg | 3.3 and later (`>=3.3.5,<4`) |
+| 0.1.1 | Declared | Tested |
+|---|---|---|
+| `agent-framework-core` | `>=1.19.0,<2` | 1.19.x, 1.20.x |
+| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.4.0,<2` | 1.4.x, 1.5.x |
+| Python | `>=3.11` | 3.11 to 3.14; 3.15.0b4 smoke-tested, not supported yet |
+| PostgreSQL | | 16, 17 |
+| psycopg | `>=3.3.5,<4` | 3.3.5 or later, below 4 |
 
-The MAF bounds are the tested range, and a patch release widens them after a new MAF minor passes CI. See [docs/compatibility.md](docs/compatibility.md) for the support policy.
+With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](docs/compatibility.md) for the support policy and how to silence it. 0.1.0 was tagged on GitHub but never published to PyPI.
 
 ## What it implements
 
 | Class | MAF interface | Extra | Conditions |
 |---|---|---|---|
-| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with the installed MAF's own rule, which changed in 1.20 |
+| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with the installed MAF's own rule, which changed in 1.20; tested on MAF 1.19 and 1.20 |
 | `PostgresSessionStore` | `SessionStore` | none | MAF marks `SessionStore` experimental |
 | `PostgresCheckpointStorage` | `CheckpointStorage` | none | Decodes only MAF's safe types and its own; `allowed_checkpoint_types` adds more |
-| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store` |
+| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store`; tested on `agent-framework-ag-ui` 1.4 and 1.5 |
 | `PostgresDocumentStore`, `PostgresLeases` | none (this package's own) | none | |
 | `PostgresPersistence` | none (creates the stores above over one pool) | none | |
 | Microsoft Entra ID sign-in (`credential=`) | none | `azure` | Azure Database for PostgreSQL with Entra authentication |
@@ -293,7 +292,7 @@ Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every w
 
 ## Private Agent Framework imports
 
-The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest release past the upper bound, so an upstream rename shows up there before a patch release widens the bound. See [docs/compatibility.md](docs/compatibility.md).
+The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](docs/compatibility.md).
 
 ## Development
 

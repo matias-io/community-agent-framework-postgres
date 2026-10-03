@@ -1,6 +1,7 @@
 name: Canary
 
-# Weekly run against the newest MAF releases, past this package's upper bound, so a new MAF minor fails here before users hit the bound.
+# Weekly run against the newest MAF releases, including minors newer than the tested ones, so a new MAF minor
+# that breaks this package fails here; a minor that passes is added to the tested range in the next release.
 
 on:
   # GitHub disables scheduled workflows after 60 days without repository activity; re-enable this one in the
@@ -35,7 +36,7 @@ jobs:
           python-version: "3.14"
       - run: uv sync --all-extras
       # uv pip install does not re-check the bounds this package declares, so it
-      # installs the newest MAF even when that release is outside them.
+      # installs the newest MAF even when a 2.0 release is outside them.
       - run: uv pip install --upgrade agent-framework-core agent-framework-ag-ui
       - run: uv pip show agent-framework-core agent-framework-ag-ui
       - run: uv run --no-sync python -c "import sys; print(sys.version)"

@@ -19,6 +19,7 @@ from ._client import (
 )
 from ._document_store import Document, DocumentSummary, PostgresDocumentStore
 from ._entra import ENTRA_SCOPE, EntraCredential
+from ._framework import UntestedAgentFrameworkWarning, warn_if_untested_agent_framework
 from ._history_provider import PostgresHistoryProvider
 from ._leases import Lease, PostgresLeases
 from ._migrations import MIGRATIONS, MigrationReport
@@ -34,6 +35,9 @@ try:
     __version__ = version("community-agent-framework-postgres")
 except PackageNotFoundError:  # pragma: no cover - source checkout without install
     __version__ = "0.0.0"
+
+# Points at the import that loaded this package; the import machinery's own frames are skipped.
+warn_if_untested_agent_framework(stacklevel=2)
 
 _LAZY = {"PostgresAGUIThreadSnapshotStore"}
 
@@ -75,6 +79,7 @@ __all__ = [
     "RetentionPolicy",
     "RevisionConflict",
     "TableNames",
+    "UntestedAgentFrameworkWarning",
     "__version__",
     "render_migrations",
 ]
