@@ -3,15 +3,22 @@
 azure-identity stays optional: a credential is anything with ``get_token(*scopes)``, sync or async, so this
 module never imports ``azure``. PostgreSQL checks the password only at login, so a connection stays
 authenticated after its token expires; the pool's ``max_lifetime`` bounds how long such a connection lives.
+
+``connect`` runs inside psycopg_pool's background workers, which log a failure and retry, so a sign-in
+failure is logged here and remembered on the connection class for the pool-timeout message, and
+``ClientHandle.open`` fetches one token up front so a broken credential fails the first call directly.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import inspect
 import json
-from collections.abc import Awaitable
-from typing import Any, Protocol, Self, cast
+import logging
+import os
+from collections.abc import Awaitable, Mapping
+from typing import Any, ClassVar, Protocol, Self, cast
 
 from psycopg import AsyncConnection, AsyncCursor
 from psycopg.abc import AdaptContext, ConnParam
@@ -25,6 +32,8 @@ ENTRA_SCOPE = "https://ossrdbms-aad.database.windows.net/.default"
 
 # Claims that carry a user principal name, in the order a token is searched for one.
 _USER_CLAIMS = ("upn", "preferred_username", "unique_name")
+
+logger = logging.getLogger(__name__)
 
 
 class EntraAccessToken(Protocol):
@@ -43,15 +52,24 @@ class EntraCredential(Protocol):
     def get_token(self, *scopes: str, **kwargs: Any) -> EntraAccessToken | Awaitable[EntraAccessToken]: ...
 
 
+def _describe(exc: BaseException) -> str:
+    text = str(exc)
+    return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
+
+
 async def _fetch_token(credential: EntraCredential) -> str:
     try:
-        result = credential.get_token(ENTRA_SCOPE)
+        if inspect.iscoroutinefunction(credential.get_token):
+            result = credential.get_token(ENTRA_SCOPE)
+        else:
+            # A sync credential can reach the network; run it off the event loop.
+            result = await asyncio.to_thread(credential.get_token, ENTRA_SCOPE)
         if inspect.isawaitable(result):
             result = await result
     except Exception as exc:
-        # The token was never issued, so the chained credential error cannot contain it.
+        # The token was never issued, so the credential's error cannot contain it; azure-identity's never does.
         raise PostgresStorageError(
-            f"Could not get a Microsoft Entra ID token for {ENTRA_SCOPE}; see the chained credential error."
+            f"Could not get a Microsoft Entra ID token for {ENTRA_SCOPE}: {_describe(exc)}"
         ) from exc
     token: object = getattr(result, "token", None)
     if not isinstance(token, str) or not token:
@@ -79,11 +97,15 @@ def _user_from_token(token: str) -> str | None:
 
 
 async def entra_connection_kwargs(credential: EntraCredential, conninfo: str, kwargs: dict[str, ConnParam]) -> None:
-    """Set ``password`` to a fresh token, ``user`` from the token when absent, and ``sslmode=require`` when unset."""
+    """Set ``password`` to a fresh token, ``user`` from the token, and ``sslmode=require``.
+
+    ``user`` and ``sslmode`` are set only when neither the connection string, ``kwargs`` nor libpq's
+    ``PGUSER`` and ``PGSSLMODE`` environment variables set them.
+    """
     params = conninfo_to_dict(conninfo)
     token = await _fetch_token(credential)
     kwargs["password"] = token
-    if not params.get("user") and not kwargs.get("user"):
+    if not params.get("user") and not kwargs.get("user") and not os.environ.get("PGUSER"):
         user = _user_from_token(token)
         if user is None:
             raise PostgresStorageError(
@@ -91,8 +113,16 @@ async def entra_connection_kwargs(credential: EntraCredential, conninfo: str, kw
                 " set user= in the connection string to the database role of this identity."
             )
         kwargs["user"] = user
-    if "sslmode" not in params and "sslmode" not in kwargs:
+    if "sslmode" not in params and "sslmode" not in kwargs and not os.environ.get("PGSSLMODE"):
         kwargs["sslmode"] = "require"
+
+
+async def check_credential(credential: EntraCredential, conninfo: str, kwargs: Mapping[str, Any]) -> None:
+    """Sign in the way ``connect`` will, without connecting, so a credential failure reaches the caller.
+
+    Nothing is kept: each new connection still fetches its own token.
+    """
+    await entra_connection_kwargs(credential, conninfo, dict(kwargs))
 
 
 def entra_connection_class(credential: EntraCredential) -> type[AsyncConnection[Any]]:
@@ -101,6 +131,9 @@ def entra_connection_class(credential: EntraCredential) -> type[AsyncConnection[
         raise TypeError("credential must have a get_token(*scopes) method, like the azure.identity credentials.")
 
     class EntraConnection(AsyncConnection[Any]):
+        # The last sign-in failure, for ClientHandle's pool-timeout message; cleared by a successful sign-in.
+        entra_last_error: ClassVar[str | None] = None
+
         @classmethod
         async def connect(
             cls,
@@ -113,7 +146,15 @@ def entra_connection_class(credential: EntraCredential) -> type[AsyncConnection[
             cursor_factory: type[AsyncCursor[Any]] | None = None,
             **kwargs: ConnParam,
         ) -> Self:
-            await entra_connection_kwargs(credential, conninfo, kwargs)
+            try:
+                await entra_connection_kwargs(credential, conninfo, kwargs)
+            except PostgresStorageError as exc:
+                # psycopg_pool's worker swallows this and retries; log it where the application can see it.
+                message = str(exc)
+                logger.error("Microsoft Entra ID sign-in failed: %s", message)
+                EntraConnection.entra_last_error = message
+                raise
+            EntraConnection.entra_last_error = None
             return await super().connect(
                 conninfo,
                 autocommit=autocommit,

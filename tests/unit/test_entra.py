@@ -1,5 +1,10 @@
 import base64
+import inspect
 import json
+import logging
+import threading
+import time
+from importlib.metadata import requires
 from typing import Any
 
 import pytest
@@ -136,13 +141,119 @@ async def test_sslmode_require_is_added_only_when_missing(captured: list[tuple[s
     assert "sslmode" not in captured[2][1]
 
 
-async def test_a_failing_credential_names_the_scope_not_a_token(captured: list[tuple[str, dict[str, Any]]]) -> None:
+async def test_a_failing_credential_is_named_with_its_cause(captured: list[tuple[str, dict[str, Any]]]) -> None:
     with pytest.raises(PostgresStorageError) as info:
         await entra_connection_class(FailingCredential()).connect("host=db user=app")
     assert ENTRA_SCOPE in str(info.value)
-    assert "no identity available" not in str(info.value)  # the credential's text stays in the chained cause
+    assert "RuntimeError: no identity available" in str(info.value)
     assert isinstance(info.value.__cause__, RuntimeError)
     assert captured == []
+
+
+async def test_a_sync_credential_runs_off_the_event_loop(captured: list[tuple[str, dict[str, Any]]]) -> None:
+    threads: list[int] = []
+
+    class ThreadRecordingCredential:
+        def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+            threads.append(threading.get_ident())
+            return _Token(TOKEN_SECRET)
+
+    await entra_connection_class(ThreadRecordingCredential()).connect("host=db user=app")
+    assert threads and threads[0] != threading.get_ident()
+    assert captured[0][1]["password"] == TOKEN_SECRET
+
+
+async def test_pgsslmode_in_the_environment_is_respected(
+    captured: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PGSSLMODE", "verify-full")
+    await entra_connection_class(SyncCredential()).connect("host=db user=app")
+    assert "sslmode" not in captured[0][1]  # libpq applies PGSSLMODE itself
+
+
+async def test_pguser_in_the_environment_is_used_before_the_token(
+    captured: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PGUSER", "my-app-identity")
+    await entra_connection_class(SyncCredential(_jwt({"upn": "ada@contoso.com"}))).connect("host=db")
+    await entra_connection_class(SyncCredential(_jwt({"oid": "0"}))).connect("host=db")
+    assert "user" not in captured[0][1]  # libpq applies PGUSER itself
+    assert "user" not in captured[1][1]
+
+
+def test_connect_takes_the_same_keywords_as_psycopg() -> None:
+    def parameters(function: Any) -> list[tuple[str, Any, Any]]:
+        return [(p.name, p.kind, p.default) for p in inspect.signature(function).parameters.values()]
+
+    assert parameters(entra_connection_class(SyncCredential()).connect) == parameters(AsyncConnection.connect)
+
+
+def test_the_azure_extra_installs_an_async_transport() -> None:
+    declared = requires("community-agent-framework-postgres") or []
+    azure = [r.split(";")[0] for r in declared if "extra == 'azure'" in r.replace('"', "'")]
+    assert any(r.startswith("aiohttp") for r in azure), azure
+    from azure.core.pipeline.transport import AioHttpTransport
+
+    assert AioHttpTransport is not None
+
+
+async def test_open_fetches_a_token_before_the_pool_opens() -> None:
+    handle = ClientHandle(SecretString("host=127.0.0.1 dbname=app user=app"), None, credential=FailingCredential())
+    try:
+        with pytest.raises(PostgresStorageError) as info:
+            await handle.open()
+        assert "RuntimeError: no identity available" in str(info.value)
+        assert isinstance(info.value.__cause__, RuntimeError)
+        assert isinstance(handle.client, AsyncConnectionPool) and handle.client.closed
+    finally:
+        await handle.close()
+
+
+async def test_a_hub_store_runs_the_credential_check_on_first_use() -> None:
+    hub = PostgresPersistence(
+        application_id="tests", connection_string="host=127.0.0.1 user=app", credential=FailingCredential()
+    )
+    try:
+        started = time.monotonic()
+        with pytest.raises(PostgresStorageError, match="RuntimeError: no identity available"):
+            await hub.history_provider().get_messages("s")
+        assert time.monotonic() - started < 5
+    finally:
+        await hub.close()
+
+
+async def test_a_sign_in_failure_inside_the_pool_is_logged_and_named_by_the_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class ExpiringCredential:
+        """Signs in once, for the eager check, then fails like an expired Azure CLI login."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("az login required")
+            return _Token(TOKEN_SECRET)
+
+    handle = ClientHandle(SecretString("host=127.0.0.1 dbname=app user=app"), None, credential=ExpiringCredential())
+    assert isinstance(handle.client, AsyncConnectionPool)
+    handle.client.timeout = 1.0
+    caplog.set_level(logging.ERROR, logger="agent_framework_community_postgres")
+    try:
+        with pytest.raises(PostgresStorageError) as info:
+            async with handle.connection():
+                pass
+        message = str(info.value)
+        assert "No PostgreSQL connection became available within 1 second" in message
+        assert "Last connection error:" in message and "RuntimeError: az login required" in message
+        logged = [r for r in caplog.records if r.name.startswith("agent_framework_community_postgres")]
+        assert logged and "RuntimeError: az login required" in logged[0].getMessage()
+        assert all(r.levelno == logging.ERROR for r in logged)
+        assert TOKEN_SECRET not in message and TOKEN_SECRET not in caplog.text
+    finally:
+        await handle.close()
 
 
 async def test_an_empty_token_is_refused(captured: list[tuple[str, dict[str, Any]]]) -> None:

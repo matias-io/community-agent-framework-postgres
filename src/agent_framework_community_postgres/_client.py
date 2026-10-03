@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import re
 import weakref
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
@@ -153,6 +154,8 @@ class ClientHandle:
             raise TypeError("client must be a psycopg AsyncConnection or AsyncConnectionPool.")
         self.owned = client is None
         self.client: PostgresClient
+        # Signs in once without connecting; set only for an owned pool with a credential.
+        self._check_credential: Callable[[], Awaitable[None]] | None = None
         if connection_string is not None:
             conninfo = connection_string.get_secret_value()
             if not conninfo.strip():
@@ -167,9 +170,10 @@ class ClientHandle:
                 kwargs["connect_timeout"] = _CONNECT_TIMEOUT_SECONDS
             connection_class: type[AsyncConnection[Any]] = AsyncConnection
             if credential is not None:
-                from ._entra import entra_connection_class
+                from ._entra import check_credential, entra_connection_class
 
                 connection_class = entra_connection_class(credential)
+                self._check_credential = functools.partial(check_credential, credential, conninfo, dict(kwargs))
             self.client = AsyncConnectionPool(
                 conninfo,
                 connection_class=connection_class,
@@ -190,20 +194,37 @@ class ClientHandle:
         # psycopg_pool raises the same PoolTimeout for a database that is down and for a pool whose
         # connections are all busy, so the message names both.
         seconds = f"{pool.timeout:g} second{'' if pool.timeout == 1 else 's'}"
-        return PostgresStorageError(
+        message = (
             f"No PostgreSQL connection became available within {seconds}: the database is unreachable or"
             " every pooled connection is busy; psycopg_pool logs the driver's reason."
         )
+        # Set only on an Entra ID connection class (see _entra); the message names no token.
+        last_error = getattr(pool.connection_class, "entra_last_error", None)
+        if isinstance(last_error, str):
+            message += f" Last connection error: {last_error}"
+        return PostgresStorageError(message)
 
     def __repr__(self) -> str:
         kind = type(self.client).__name__
         return f"ClientHandle(owned={self.owned}, client={kind}, closed={self.closed})"
 
     async def open(self) -> None:
-        """Open an owned pool; a no-op for a borrowed client."""
+        """Open an owned pool; a no-op for a borrowed client.
+
+        With a credential, one token is fetched before the pool opens, so a failing credential raises
+        ``PostgresStorageError`` here instead of a pool timeout later. Nothing is cached.
+        """
         self._ensure_open()
         if self.owned and isinstance(self.client, AsyncConnectionPool):
+            if self._check_credential is not None and self.client.closed:
+                await self._check_credential()
             await self.client.open()
+
+    def _root(self) -> ClientHandle:
+        handle = self
+        while handle._parent is not None:
+            handle = handle._parent
+        return handle
 
     def child(self) -> ClientHandle:
         """A borrowed handle over the same client that stops working once this handle is closed."""
@@ -230,6 +251,8 @@ class ClientHandle:
         self._ensure_open()
         try:
             if isinstance(self.client, AsyncConnectionPool):
+                # The handle that owns the pool opens it, so a hub's stores get its credential check too.
+                await self._root().open()
                 await self.client.open()
                 async with self.client.connection() as connection, connection.transaction():
                     yield connection

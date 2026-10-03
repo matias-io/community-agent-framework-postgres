@@ -42,7 +42,7 @@ pip install "community-agent-framework-postgres[ag-ui]"
 pip install "community-agent-framework-postgres[azure]"
 ```
 
-The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works. `from agent_framework_community_postgres import *` also needs the extra, because `__all__` lists that store. The `azure` extra installs `azure-identity` for [Microsoft Entra ID sign-in](#microsoft-entra-id-on-azure).
+The `ag-ui` extra installs `agent-framework-ag-ui`. Without it, every store except `PostgresAGUIThreadSnapshotStore` works. `from agent_framework_community_postgres import *` also needs the extra, because `__all__` lists that store. The `azure` extra installs `azure-identity`, and `aiohttp` for its async credentials, for [Microsoft Entra ID sign-in](#microsoft-entra-id-on-azure).
 
 On Windows, async psycopg cannot run on the default `ProactorEventLoop`. Run a script's entry point on a selector loop:
 
@@ -258,12 +258,18 @@ With the `azure` extra, pass an `azure-identity` credential as `credential=` and
 ```python
 from azure.identity.aio import DefaultAzureCredential
 
-hub = PostgresPersistence(
-    application_id="my-app",
-    connection_string="host=my-server.postgres.database.azure.com dbname=agent_framework user=ada@contoso.com",
-    credential=DefaultAzureCredential(),
-)
+DSN = "host=my-server.postgres.database.azure.com dbname=agent_framework user=ada@contoso.com"
+
+
+async def main() -> None:
+    async with (
+        DefaultAzureCredential() as credential,
+        PostgresPersistence(application_id="my-app", connection_string=DSN, credential=credential) as hub,
+    ):
+        await hub.migrate()
 ```
+
+A failing credential raises `PostgresStorageError` naming its error on the first call. A managed identity or a service principal has no user name in its token, so set `user=` to its database role.
 
 This is verified with a fake credential against PostgreSQL 16 and 17 and has not yet been run against an Azure server. [docs/azure-entra.md](docs/azure-entra.md) covers the server setup, managed identities, token lifetime and the CLI.
 

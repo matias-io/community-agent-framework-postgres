@@ -27,7 +27,8 @@ dependencies = [
 
 [project.optional-dependencies]
 ag-ui = ["agent-framework-ag-ui>=1.4.0,<1.6"]
-azure = ["azure-identity>=1.19,<2"]
+# azure-identity's aio credentials need an async HTTP transport, which azure-core takes from aiohttp.
+azure = ["azure-identity>=1.19,<2", "aiohttp>=3.9,<4"]
 
 [project.urls]
 Source = "https://github.com/matias-io/community-agent-framework-postgres"
@@ -43,6 +44,7 @@ dev = [
   "pyright>=1.1.400",
   "agent-framework-ag-ui>=1.4.0,<1.6",
   "azure-identity>=1.19,<2",
+  "aiohttp>=3.9,<4",
 ]
 
 [build-system]

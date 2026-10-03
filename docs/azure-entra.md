@@ -8,7 +8,7 @@ Verified with a fake credential against PostgreSQL 16 and 17; not yet run agains
 
 - An Azure Database for PostgreSQL flexible server with Microsoft Entra authentication enabled.
 - The Entra user, group, service principal or managed identity added to the server as a database role, with the privileges `migrate()` needs on the schema. See [migrations.md](migrations.md).
-- The `azure` extra, which installs `azure-identity`:
+- The `azure` extra, which installs `azure-identity` and `aiohttp`. The `azure.identity.aio` credentials need `aiohttp` as their HTTP transport and raise `ImportError` without it:
 
 ```bash
 pip install "community-agent-framework-postgres[azure]"
@@ -43,7 +43,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-On Azure compute, a managed identity is the usual choice. Its token carries no user name, so set `user=` to the database role you created for it, which is normally the identity's name:
+On Azure compute, a managed identity is the usual choice. Its token carries no user name, and neither does a service principal's (for example from `ClientSecretCredential`). For either, set `user=` to the database role you created for it, which is normally the identity's or the application's name. `PGUSER` in the environment works too:
 
 ```python
 from azure.identity.aio import ManagedIdentityCredential
@@ -64,12 +64,20 @@ For each new connection the pool opens, the package:
 
 1. Calls `credential.get_token("https://ossrdbms-aad.database.windows.net/.default")`, and awaits the result when the credential is async.
 2. Passes `token.token` as the password.
-3. When the connection string has no `user`, takes it from the token's `upn`, `preferred_username` or `unique_name` claim, in that order. The token is decoded without verification only to read that name; the server verifies the token. If none of the claims is present, it raises `PostgresStorageError` asking you to set `user=` in the connection string.
-4. Adds `sslmode=require` when the connection string sets no `sslmode`. Azure requires TLS.
+3. When neither the connection string nor `PGUSER` sets a user, takes it from the token's `upn`, `preferred_username` or `unique_name` claim, in that order. The token is decoded without verification only to read that name; the server verifies the token. If none of the claims is present, it raises `PostgresStorageError` asking you to set `user=` in the connection string.
+4. Adds `sslmode=require` when neither the connection string nor `PGSSLMODE` sets an `sslmode`. Azure requires TLS.
 
-A credential is any object with a `get_token(*scopes)` method that returns an object with `token` and `expires_on`, sync or async. Every `azure.identity` and `azure.identity.aio` credential fits, and so does your own. When the credential fails, the package raises `PostgresStorageError` naming the scope and chains the credential's error as the cause. No message, log line or `repr` from this package contains the token.
+`sslmode=require` encrypts the connection but does not check the server's certificate. To check it, set `sslmode=verify-full` and `sslrootcert=` to a file holding the root certificate authorities Microsoft lists for Azure Database for PostgreSQL, in the connection string or through `PGSSLMODE` and `PGSSLROOTCERT`.
 
-Prefer the `azure.identity.aio` credentials in an async application: a synchronous credential blocks the event loop while it fetches or refreshes a token. Close an `aio` credential when you are done with it, for example with `async with` as above.
+A credential is any object with a `get_token(*scopes)` method that returns an object with `token` and `expires_on`, sync or async. Every `azure.identity` and `azure.identity.aio` credential fits, and so does your own. The package calls a synchronous `get_token` in a worker thread, so it does not block the event loop, but the `azure.identity.aio` credentials are the better fit for an async application. Close an `aio` credential when you are done with it, for example with `async with` as above.
+
+## When sign-in fails
+
+Before the owned pool opens, the package fetches one token and resolves the user the way a new connection will. That happens in `open()`, when you enter the hub with `async with`, or on the first call. If the credential fails, or the token names no user and none is set, that call raises `PostgresStorageError` at once. The message names the credential's exception type and message, for example `RuntimeError: az login required`, and the credential's error is chained as the cause. The token is not kept: every new connection still fetches its own.
+
+Once the pool is open, it signs in new connections in background workers, which retry instead of raising. If the credential fails there, for example after an Azure CLI login expires, the package logs the failure at error level on the `agent_framework_community_postgres` logger. A call that then waits out the pool timeout raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` ending in `Last connection error:` and the same failure. A token the server rejects fails like a wrong password, and psycopg_pool logs it on the `psycopg.pool` logger.
+
+No message, log line or `repr` from this package contains the token. azure-identity's error messages do not contain one either.
 
 ## Token lifetime
 

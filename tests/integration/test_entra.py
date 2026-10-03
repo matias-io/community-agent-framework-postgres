@@ -1,3 +1,4 @@
+import time
 from typing import Any
 
 import pytest
@@ -5,7 +6,7 @@ from agent_framework import Message
 from psycopg import OperationalError
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from agent_framework_community_postgres import PostgresPersistence
+from agent_framework_community_postgres import PostgresPersistence, PostgresStorageError
 from agent_framework_community_postgres._entra import ENTRA_SCOPE, entra_connection_class
 
 pytestmark = pytest.mark.integration
@@ -50,6 +51,27 @@ async def test_the_token_reaches_postgres_as_the_password(test_dsn: str, schema:
         await history.save_messages("s", [Message(role="user", contents=["signed in with a token"])])
         assert [m.text for m in await history.get_messages("s")] == ["signed in with a token"]
     assert credential.scopes and set(credential.scopes) == {(ENTRA_SCOPE,)}
+
+
+class NotSignedIn:
+    async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+        raise RuntimeError("az login required")
+
+
+async def test_a_failing_credential_reaches_the_caller_through_the_pool(test_dsn: str, schema: str) -> None:
+    conninfo, _ = _split(test_dsn)
+    hub = PostgresPersistence(
+        application_id="tests", connection_string=conninfo, schema=schema, credential=NotSignedIn()
+    )
+    try:
+        started = time.monotonic()
+        with pytest.raises(PostgresStorageError) as info:
+            await hub.migrate()
+        assert time.monotonic() - started < 5  # the eager check, not the 10 second pool timeout
+        assert "RuntimeError" in str(info.value) and "az login required" in str(info.value)
+        assert isinstance(info.value.__cause__, RuntimeError)
+    finally:
+        await hub.close()
 
 
 async def test_a_wrong_token_is_refused_by_postgres(test_dsn: str) -> None:

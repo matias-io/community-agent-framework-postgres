@@ -18,6 +18,7 @@ from ._client import (
     TableNames,
 )
 from ._document_store import Document, DocumentSummary, PostgresDocumentStore
+from ._entra import ENTRA_SCOPE, EntraCredential
 from ._history_provider import PostgresHistoryProvider
 from ._leases import Lease, PostgresLeases
 from ._migrations import MIGRATIONS, MigrationReport
@@ -50,9 +51,11 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "ENTRA_SCOPE",
     "MIGRATIONS",
     "Document",
     "DocumentSummary",
+    "EntraCredential",
     "Lease",
     "LeaseLost",
     "LeaseUnavailable",
