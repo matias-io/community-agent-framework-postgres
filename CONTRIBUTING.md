@@ -74,6 +74,8 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 4. When MAF has an in-memory equivalent, add a conformance test under `tests/conformance/` that runs the same cases against both.
 5. Add a page under `docs/`, link it from `README.md`, and add a sample under `samples/`.
 
-## Known follow-ups
+## GitHub Actions
 
-- Pin the GitHub Actions in `.github/workflows/` by commit SHA instead of by tag, starting with the release workflow, which can publish to PyPI.
+Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together.
+
+`ci.yml` runs the suite on every Python and PostgreSQL version, once on the locked MAF versions and once on the newest MAF release the declared ranges allow. Both legs block a merge. `canary.yml` runs every Monday against the newest MAF release, past the declared upper bound. When it fails, a new MAF minor needs work before a patch release widens the bound.

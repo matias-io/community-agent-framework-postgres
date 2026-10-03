@@ -31,7 +31,7 @@ MAF does not export the three names below. Microsoft's own Cosmos DB and Redis p
 | `encode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Encoding checkpoints in `PostgresCheckpointStorage` | `agent-framework-core` 1.19.0, 1.20.0 |
 | `decode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Decoding checkpoints and the save-time restore check | `agent-framework-core` 1.19.0, 1.20.0 |
 
-`tests/unit/test_framework.py` guards all three. It checks the names exist, that the checkpoint encoding round-trips `datetime` and `UUID` values, and that `filter_new_messages` drops a replayed prefix. If an upstream release removes a name, importing the package raises `ImportError` naming the installed `agent-framework-core` version and the supported range. CI runs the suite a second time against the newest `agent-framework-core`, and that job does not block a merge.
+`tests/unit/test_framework.py` guards all three. It checks the names exist, that the checkpoint encoding round-trips `datetime` and `UUID` values, and that `filter_new_messages` drops a replayed prefix. If an upstream release removes a name, importing the package raises `ImportError` naming the installed `agent-framework-core` version and the supported range. CI runs the suite a second time against the newest `agent-framework-core` the declared range allows, and that job blocks a merge. A weekly canary workflow runs it against the newest release past the upper bound, so a rename in a new MAF minor shows up there before a patch release widens the bound.
 
 ## JSONB limits
 

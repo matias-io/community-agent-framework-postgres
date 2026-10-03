@@ -287,7 +287,7 @@ Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every w
 
 ## Private Agent Framework imports
 
-The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` release, so an upstream rename shows up there before users upgrade. That job does not block a merge. See [docs/compatibility.md](docs/compatibility.md).
+The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest release past the upper bound, so an upstream rename shows up there before a patch release widens the bound. See [docs/compatibility.md](docs/compatibility.md).
 
 ## Development
 

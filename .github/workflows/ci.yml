@@ -16,8 +16,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - run: uv sync --all-extras
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -34,7 +34,6 @@ jobs:
         exclude:
           - postgres: "16"
             maf: "latest"
-    continue-on-error: ${{ matrix.maf == 'latest' }}
     services:
       postgres:
         image: postgres:${{ matrix.postgres }}
@@ -49,14 +48,16 @@ jobs:
     env:
       POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --all-extras
-      # Canary: re-resolve the two MAF packages to the newest release the
+      # Latest: re-resolve the two MAF packages to the newest release the
       # declared ranges allow, then sync that lock into the same .venv the
-      # test step runs in. `uv run` below keeps the upgraded lock.
+      # test step runs in. `uv run` below keeps the upgraded lock. The ranges
+      # are the supported range, so this leg blocks a merge; canary.yml
+      # tests releases beyond them.
       - if: matrix.maf == 'latest'
         run: |
           uv lock --upgrade-package agent-framework-core --upgrade-package agent-framework-ag-ui

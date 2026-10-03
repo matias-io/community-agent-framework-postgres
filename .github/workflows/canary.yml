@@ -1,0 +1,40 @@
+name: Canary
+
+# Weekly run against the newest MAF releases, past this package's upper bound, so a new MAF minor fails here before users hit the bound.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  newest-maf:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_framework
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_framework"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --all-extras
+      # uv pip install does not re-check the bounds this package declares, so it
+      # installs the newest MAF even when that release is outside them.
+      - run: uv pip install --upgrade agent-framework-core agent-framework-ag-ui
+      - run: uv pip show agent-framework-core agent-framework-ag-ui
+      - run: uv run --no-sync python -c "import sys; print(sys.version)"
+      - run: uv run --no-sync pytest -v
