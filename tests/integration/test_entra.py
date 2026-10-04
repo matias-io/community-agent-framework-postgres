@@ -68,8 +68,10 @@ async def test_a_failing_credential_reaches_the_caller_through_the_pool(test_dsn
         with pytest.raises(PostgresStorageError) as info:
             await hub.migrate()
         assert time.monotonic() - started < 5  # the eager check, not the 10 second pool timeout
-        assert "RuntimeError" in str(info.value) and "az login required" in str(info.value)
+        assert "RuntimeError: see the chained cause" in str(info.value)
+        assert "az login required" not in str(info.value)
         assert isinstance(info.value.__cause__, RuntimeError)
+        assert str(info.value.__cause__) == "az login required"
     finally:
         await hub.close()
 
