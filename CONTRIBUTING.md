@@ -78,11 +78,11 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 
 Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together. Dependabot (`.github/dependabot.yml`) checks the pins weekly and opens a pull request that does both.
 
-`ci.yml` runs the suite on every Python and PostgreSQL version, once on the locked MAF versions and once on the newest MAF release the declared ranges allow. Both legs block a merge. `canary.yml` runs every Monday against the newest MAF release, ignoring the untested-version warning. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and publishes only if that passes.
+`ci.yml` runs the locked MAF versions on Python 3.11 to 3.14 against PostgreSQL 16 and 17. It also runs the newest MAF release the declared ranges allow on each Python version against PostgreSQL 17. All these jobs block a merge. `canary.yml` runs every Monday against the newest MAF release, ignoring the untested-version warning. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and publishes only if that passes.
 
 ## Releasing
 
-A release goes to PyPI from a tag, through `release.yml`. A version on PyPI can never be uploaded again, even after it is deleted, so check everything before the tag is pushed.
+A release goes to PyPI from a tag, through `release.yml`. PyPI does not allow an uploaded distribution filename to be reused, even after that file is deleted, so check everything before the tag is pushed.
 
 One-time setup:
 
@@ -91,7 +91,7 @@ One-time setup:
 
 For each release:
 
-1. On the release branch, set `project.version` in `pyproject.toml`, add the version's section and link reference to `CHANGELOG.md`, update the tested versions in `_framework.py` and `docs/compatibility.md`, and point the README's links at the new tag (`blob/vX.Y.Z/`); `tests/unit/test_docs.py` checks the tag matches `project.version`.
+1. On the release branch, set `project.version` in `pyproject.toml`, add the version's section and link reference to `CHANGELOG.md`, replace its `Unreleased` date with the publication date, update the tested versions in `_framework.py` and `docs/compatibility.md`, and point the README's links at the new tag (`blob/vX.Y.Z/`); `tests/unit/test_docs.py` checks the tag matches `project.version`.
 2. Push the branch and open a pull request against `main`.
 3. Wait for the full CI matrix to pass, including PostgreSQL 16 and the `latest` MAF leg.
 4. Merge the pull request.

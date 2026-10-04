@@ -16,7 +16,7 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 | PostgreSQL | | 16, 17 |
 | psycopg | `>=3.3.5,<4` | 3.3.5 or later, below 4 |
 
-With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) for the support policy and how to silence it. 0.1.0 is commit `97d3e3a` on `main`, never tagged on GitHub and never published to PyPI; 0.1.1 supersedes it.
+With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) for the support policy and how to silence it. 0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed. 0.1.1 supersedes it and is intended as the first PyPI release.
 
 ## What it implements
 

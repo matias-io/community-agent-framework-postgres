@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-10-02
+## [0.1.1] - Unreleased
 
 ### Added
 
@@ -18,18 +18,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Custom credential exception text stays out of package errors and logs. Azure SDK exception diagnostics remain available, and the original exception remains the chained cause.
 - Hub factories now reject `schema` and `table_prefix` overrides, so every store they create stays within the namespace covered by `hub.migrate()` and `hub.purge()`. Per-store `retention` overrides remain supported.
 - A string with a lone surrogate now raises `ValueError` before any SQL runs, instead of a `UnicodeEncodeError` from inside psycopg.
 - `PurgeReport` can be pickled, copied and passed to `dataclasses.asdict`, and its `counts` is read-only: it is a mapping, not a `dict`, so no `dict` method can change it.
 
 ### Notes
 
-- 0.1.1 is the first release on PyPI. 0.1.0 is commit `97d3e3a` on `main`, never tagged on GitHub and never published; 0.1.1 supersedes it.
+- 0.1.1 is intended as the first PyPI release. 0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed; 0.1.1 supersedes it.
 - MAF 1.20 changed its own replay rule, and `PostgresHistoryProvider` follows the installed MAF. When the stored history is a single user message without an id and the next batch starts with that same message, 1.20 stores the repeat; 1.19 drops it.
 
 ## [0.1.0] - 2026-10-01
 
-Commit `97d3e3a` on `main`, never tagged on GitHub and not published to PyPI.
+Unpublished snapshot at commit `50c91c5`. Its tag is local and must not be pushed.
 
 ### Added
 
@@ -45,5 +46,5 @@ Commit `97d3e3a` on `main`, never tagged on GitHub and not published to PyPI.
 - A CLI, `python -m agent_framework_community_postgres`, with `migrate`, `migrate --print`, `status` and `purge [--mode tombstone|delete] --application-id ID`.
 - Stores created by a hub refuse to run after the hub closes.
 
-[0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/97d3e3a...v0.1.1
-[0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/tree/97d3e3a
+[0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/50c91c5...v0.1.1
+[0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/tree/50c91c5

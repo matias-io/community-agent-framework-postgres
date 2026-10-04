@@ -7,7 +7,7 @@
 | 0.1.1 | Declared `>=1.19.0,<2`; tested on 1.19.x and 1.20.x | Declared `>=1.4.0,<2`; tested on 1.4.x and 1.5.x | 3.11 to 3.14 (3.15.0b4 smoke-tested, not supported yet) | 16, 17 | 3.3.5 or later, below 4 (`>=3.3.5,<4`) |
 | 0.1.0 | Declared `>=1.19.0,<2`; tested on 1.19.0 only | Declared `>=1.4.0,<2` | 3.11 to 3.14 | 16, 17 | 3.3.5 or later, below 4 (`>=3.3.5,<4`) |
 
-0.1.0 is commit `97d3e3a` on `main`, never tagged on GitHub and never published to PyPI. 0.1.1 supersedes it and is the first release on PyPI.
+0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed. 0.1.1 supersedes it and is intended as the first PyPI release.
 
 The `azure` extra installs `azure-identity>=1.19,<2` and `aiohttp>=3.9,<4` for [Microsoft Entra ID sign-in](azure-entra.md).
 
