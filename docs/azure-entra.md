@@ -73,11 +73,11 @@ A credential is any object with a `get_token(*scopes)` method that returns an ob
 
 ## When sign-in fails
 
-Before the owned pool opens, the package fetches one token and resolves the user the way a new connection will. That happens in `open()`, when you enter the hub with `async with`, or on the first call. If the credential fails, or the token names no user and none is set, that call raises `PostgresStorageError` at once. The message names the credential's exception type and message, for example `RuntimeError: az login required`, and the credential's error is chained as the cause. The token is not kept: every new connection still fetches its own.
+Before the owned pool opens, the package fetches one token and resolves the user the way a new connection will. That happens in `open()`, when you enter the hub with `async with`, or on the first call. If the credential fails, or the token names no user and none is set, that call raises `PostgresStorageError` at once. Exceptions defined in an `azure.` module keep their type and diagnostic text, for example `ClientAuthenticationError: az login required`. Other exceptions show only their type and `see the chained cause`. The original exception remains chained as the cause. Every new connection fetches its own token.
 
 Once the pool is open, it signs in new connections in background workers, which retry instead of raising. If the credential fails there, for example after an Azure CLI login expires, the package logs the failure at error level. The record comes from `agent_framework_community_postgres._entra` and propagates to the `agent_framework_community_postgres` logger, so configuring either works. A call that then waits out the pool timeout raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` ending in `Last connection error:` and the same failure. A token the server rejects fails like a wrong password, and psycopg_pool logs it on the `psycopg.pool` logger.
 
-No message, log line or `repr` from this package contains the token. azure-identity's error messages do not contain one either.
+The package never adds the returned access token to its error messages, logs or `repr`. For exceptions outside the `azure.` namespace, their text is also omitted from the package's error messages and logs. Azure SDK diagnostic text is retained. The original chained cause is unchanged, so its text can still appear when an application prints the full traceback.
 
 ## Token lifetime
 

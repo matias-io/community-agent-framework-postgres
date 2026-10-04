@@ -53,6 +53,8 @@ class EntraCredential(Protocol):
 
 
 def _describe(exc: BaseException) -> str:
+    if not type(exc).__module__.startswith("azure."):
+        return f"{type(exc).__name__}: see the chained cause"
     text = str(exc)
     return f"{type(exc).__name__}: {text}" if text else type(exc).__name__
 
@@ -67,7 +69,7 @@ async def _fetch_token(credential: EntraCredential) -> str:
         if inspect.isawaitable(result):
             result = await result
     except Exception as exc:
-        # The token was never issued, so the credential's error cannot contain it; azure-identity's never does.
+        # Keep Azure SDK diagnostics; other exception text stays in the chained cause, not our message or log.
         raise PostgresStorageError(
             f"Could not get a Microsoft Entra ID token for {ENTRA_SCOPE}: {_describe(exc)}"
         ) from exc

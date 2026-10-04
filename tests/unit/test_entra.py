@@ -9,6 +9,8 @@ from typing import Any
 
 import pytest
 from agent_framework import SecretString
+from azure.core.exceptions import ClientAuthenticationError
+from azure.identity import CredentialUnavailableError
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
@@ -145,8 +147,55 @@ async def test_a_failing_credential_is_named_with_its_cause(captured: list[tuple
     with pytest.raises(PostgresStorageError) as info:
         await entra_connection_class(FailingCredential()).connect("host=db user=app")
     assert ENTRA_SCOPE in str(info.value)
-    assert "RuntimeError: no identity available" in str(info.value)
+    assert "RuntimeError: see the chained cause" in str(info.value)
+    assert "no identity available" not in str(info.value)
     assert isinstance(info.value.__cause__, RuntimeError)
+    assert captured == []
+
+
+@pytest.mark.parametrize("error_type", [ClientAuthenticationError, CredentialUnavailableError])
+async def test_azure_sdk_error_text_is_kept(
+    captured: list[tuple[str, dict[str, Any]]], caplog: pytest.LogCaptureFixture, error_type: type[Exception]
+) -> None:
+    class AzureCredential:
+        async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+            raise error_type("az login required")
+
+    with pytest.raises(PostgresStorageError) as info:
+        await entra_connection_class(AzureCredential()).connect("host=db user=app")
+    assert "az login required" in str(info.value)
+    assert "az login required" in caplog.text
+    assert isinstance(info.value.__cause__, error_type)
+    assert captured == []
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_custom_credential_error_text_stays_out_of_messages_and_logs(
+    captured: list[tuple[str, dict[str, Any]]], caplog: pytest.LogCaptureFixture, asynchronous: bool
+) -> None:
+    made_up_secret = "AUDIT_MADE_UP_SECRET_NOT_A_REAL_TOKEN"
+
+    class CustomCredential:
+        def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+            raise RuntimeError(made_up_secret)
+
+    class AsyncCustomCredential:
+        async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
+            raise RuntimeError(made_up_secret)
+
+    connection_class = entra_connection_class(AsyncCustomCredential() if asynchronous else CustomCredential())
+    with pytest.raises(PostgresStorageError) as info:
+        await connection_class.connect("host=db user=app")
+    assert "RuntimeError: see the chained cause" in str(info.value)
+    assert made_up_secret not in str(info.value)
+    assert made_up_secret not in caplog.text
+    assert made_up_secret not in (connection_class.entra_last_error or "")
+    assert info.value.__cause__ is not None and made_up_secret in str(info.value.__cause__)
+    pool = AsyncConnectionPool("host=db user=app", open=False, connection_class=connection_class)
+    try:
+        assert made_up_secret not in str(ClientHandle._no_connection(pool))
+    finally:
+        await pool.close()
     assert captured == []
 
 
@@ -202,7 +251,7 @@ async def test_open_fetches_a_token_before_the_pool_opens() -> None:
     try:
         with pytest.raises(PostgresStorageError) as info:
             await handle.open()
-        assert "RuntimeError: no identity available" in str(info.value)
+        assert "RuntimeError: see the chained cause" in str(info.value)
         assert isinstance(info.value.__cause__, RuntimeError)
         assert isinstance(handle.client, AsyncConnectionPool) and handle.client.closed
     finally:
@@ -215,7 +264,7 @@ async def test_a_hub_store_runs_the_credential_check_on_first_use() -> None:
     )
     try:
         started = time.monotonic()
-        with pytest.raises(PostgresStorageError, match="RuntimeError: no identity available"):
+        with pytest.raises(PostgresStorageError, match="RuntimeError: see the chained cause"):
             await hub.history_provider().get_messages("s")
         assert time.monotonic() - started < 5
     finally:
@@ -234,7 +283,7 @@ async def test_a_sign_in_failure_inside_the_pool_is_logged_and_named_by_the_time
         async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
             self.calls += 1
             if self.calls > 1:
-                raise RuntimeError("az login required")
+                raise ClientAuthenticationError("az login required")
             return _Token(TOKEN_SECRET)
 
     handle = ClientHandle(SecretString("host=127.0.0.1 dbname=app user=app"), None, credential=ExpiringCredential())
@@ -247,9 +296,9 @@ async def test_a_sign_in_failure_inside_the_pool_is_logged_and_named_by_the_time
                 pass
         message = str(info.value)
         assert "No PostgreSQL connection became available within 1 second" in message
-        assert "Last connection error:" in message and "RuntimeError: az login required" in message
+        assert "Last connection error:" in message and "ClientAuthenticationError: az login required" in message
         logged = [r for r in caplog.records if r.name.startswith("agent_framework_community_postgres")]
-        assert logged and "RuntimeError: az login required" in logged[0].getMessage()
+        assert logged and "ClientAuthenticationError: az login required" in logged[0].getMessage()
         assert all(r.levelno == logging.ERROR for r in logged)
         assert TOKEN_SECRET not in message and TOKEN_SECRET not in caplog.text
     finally:
