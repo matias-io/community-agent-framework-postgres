@@ -83,7 +83,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-Every store the hub creates borrows its pool and its `application_id`. It also takes the hub's `schema`, `table_prefix` and `retention` unless you pass your own to the factory. The factories raise `TypeError` if you pass `application_id`, `client` or `credential`. `hub.purge()` covers every store, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
+Every store the hub creates shares its pool, `application_id`, `schema` and `table_prefix`. The factories raise `TypeError` if you pass `application_id`, `client`, `credential`, `schema` or `table_prefix`. For another schema or prefix, create a separate hub or a standalone store. You can override `retention` per store. `hub.purge()` covers every store created by that hub, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
 
 ## Use with Agent Framework
 

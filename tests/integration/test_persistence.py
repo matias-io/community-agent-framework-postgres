@@ -64,13 +64,20 @@ async def test_closing_a_never_opened_hub_stops_its_stores(test_dsn: str, schema
         await pool.close()
 
 
-@pytest.mark.parametrize("key", ["application_id", "client"])
-def test_factories_reject_overriding_hub_owned_arguments(key: str) -> None:
+@pytest.mark.parametrize("key", ["application_id", "client", "credential", "schema", "table_prefix"])
+@pytest.mark.parametrize(
+    "factory", ["history_provider", "session_store", "checkpoint_storage", "thread_snapshot_store", "document_store"]
+)
+async def test_factories_reject_overriding_hub_owned_arguments(key: str, factory: str) -> None:
     persistence = PostgresPersistence(application_id="tests", connection_string="host=h")
-    with pytest.raises(TypeError, match=key):
-        persistence.session_store(**{key: "other"})
-    with pytest.raises(TypeError, match=key):
-        persistence.document_store(collection="threads", **{key: "other"})
+    arguments = {key: "other"}
+    if factory == "document_store":
+        arguments["collection"] = "threads"
+    try:
+        with pytest.raises(TypeError, match=f"{key} is set by the hub and cannot be overridden"):
+            getattr(persistence, factory)(**arguments)
+    finally:
+        await persistence.close()
 
 
 async def test_checkpoint_storage_forwards_scope_and_allowed_types(test_dsn: str, schema: str) -> None:

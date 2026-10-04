@@ -20,9 +20,9 @@ from ._session_store import PostgresSessionStore
 if TYPE_CHECKING:
     from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
-# A store with another application id would escape the hub's purge; another client or credential would
-# escape its pool and its close.
-_HUB_OWNED = ("application_id", "client", "credential")
+# Another application id, schema or prefix would escape the hub's migrations or purge; another client
+# or credential would escape its pool and its close.
+_HUB_OWNED = ("application_id", "client", "credential", "schema", "table_prefix")
 
 
 class PostgresPersistence:

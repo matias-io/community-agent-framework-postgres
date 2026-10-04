@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Hub factories now reject `schema` and `table_prefix` overrides, so every store they create stays within the namespace covered by `hub.migrate()` and `hub.purge()`. Per-store `retention` overrides remain supported.
 - A string with a lone surrogate now raises `ValueError` before any SQL runs, instead of a `UnicodeEncodeError` from inside psycopg.
 - `PurgeReport` can be pickled, copied and passed to `dataclasses.asdict`, and its `counts` is read-only: it is a mapping, not a `dict`, so no `dict` method can change it.
 
