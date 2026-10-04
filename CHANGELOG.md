@@ -23,12 +23,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Notes
 
-- 0.1.1 is the first release on PyPI. 0.1.0 was tagged on GitHub but never published.
+- 0.1.1 is the first release on PyPI. 0.1.0 is commit `97d3e3a` on `main`, never tagged on GitHub and never published; 0.1.1 supersedes it.
 - MAF 1.20 changed its own replay rule, and `PostgresHistoryProvider` follows the installed MAF. When the stored history is a single user message without an id and the next batch starts with that same message, 1.20 stores the repeat; 1.19 drops it.
 
 ## [0.1.0] - 2026-10-01
 
-Tagged on GitHub, not published to PyPI.
+Commit `97d3e3a` on `main`, never tagged on GitHub and not published to PyPI.
 
 ### Added
 
@@ -44,5 +44,5 @@ Tagged on GitHub, not published to PyPI.
 - A CLI, `python -m agent_framework_community_postgres`, with `migrate`, `migrate --print`, `status` and `purge [--mode tombstone|delete] --application-id ID`.
 - Stores created by a hub refuse to run after the hub closes.
 
-[0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/releases/tag/v0.1.0
+[0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/97d3e3a...v0.1.1
+[0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/tree/97d3e3a

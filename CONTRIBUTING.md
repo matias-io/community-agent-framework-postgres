@@ -96,7 +96,8 @@ For each release:
 3. Wait for the full CI matrix to pass, including PostgreSQL 16 and the `latest` MAF leg.
 4. Merge the pull request.
 5. Create an annotated tag on the merge commit that matches `project.version`, for example `git tag -a v0.1.1 -m "v0.1.1"`.
-6. Push the tag: `git push origin v0.1.1`. This starts `release.yml`, which checks the tag against `project.version`, runs the full suite against PostgreSQL 17, builds, and publishes.
-7. Open the project page on PyPI and check the README renders: links resolve to the tag on GitHub, and the tables display.
+6. Do not push the local `v0.1.0` tag. `release.yml` at that commit publishes on any `v*` tag, so pushing it would publish 0.1.0 to PyPI. Push only the new release tag.
+7. Push the tag: `git push origin v0.1.1`. This starts `release.yml`, which checks the tag against `project.version`, runs the full suite against PostgreSQL 17, builds, and publishes.
+8. Open the project page on PyPI and check the README renders: links resolve to the tag on GitHub, and the tables display.
 
-Optional dry run on TestPyPI before step 6: register the same pending publisher on test.pypi.org, then build locally with `uv build` and upload with `uv publish --publish-url https://test.pypi.org/legacy/` using a TestPyPI token, or add a job with `repository-url: https://test.pypi.org/legacy/` to the publish action. A version on TestPyPI cannot be reused either.
+Optional dry run on TestPyPI before step 7: register the same pending publisher on test.pypi.org, then build locally with `uv build` and upload with `uv publish --publish-url https://test.pypi.org/legacy/` using a TestPyPI token, or add a job with `repository-url: https://test.pypi.org/legacy/` to the publish action. A version on TestPyPI cannot be reused either.

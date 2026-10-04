@@ -28,9 +28,14 @@ TESTED_AG_UI = ("1.4", "1.5")
 class UntestedAgentFrameworkWarning(UserWarning):
     """The installed Agent Framework is newer than any version this release was tested on.
 
-    It is expected to work, because Agent Framework keeps breaking changes for major versions. Silence it with
-    ``warnings.filterwarnings("ignore", category=UntestedAgentFrameworkWarning)``, ``PYTHONWARNINGS`` or pytest's
-    ``filterwarnings``.
+    It is expected to work, because Agent Framework keeps breaking changes for major versions.
+
+    The warning is emitted while the package is imported, so a filter must match the message prefix
+    ``community-agent-framework-postgres has not been tested`` and be installed before the import. For example,
+    ``warnings.filterwarnings("ignore", message="community-agent-framework-postgres has not been tested")``,
+    ``PYTHONWARNINGS=ignore:community-agent-framework-postgres has not been tested``, or a pytest ``filterwarnings``
+    entry ``ignore:community-agent-framework-postgres has not been tested``. Filtering by this class works only for
+    checks made after the import.
     """
 
 
