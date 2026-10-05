@@ -17,7 +17,7 @@ def test_private_names_are_present() -> None:
     assert callable(_framework.filter_new_messages)
     assert callable(_framework.encode_checkpoint_value)
     assert callable(_framework.decode_checkpoint_value)
-    assert _framework.SUPPORTED_CORE == ">=1.19.0,<2"
+    assert _framework.SUPPORTED_CORE == ">=1.20.0,<2"
 
 
 def _declared(distribution: str) -> list[str]:
@@ -28,7 +28,7 @@ def _declared(distribution: str) -> list[str]:
 
 def test_supported_core_matches_the_declared_dependency() -> None:
     assert _declared("agent-framework-core") == sorted(_framework.SUPPORTED_CORE.split(","))
-    assert _declared("agent-framework-ag-ui") == sorted([">=1.4.0", "<2"])
+    assert _declared("agent-framework-ag-ui") == sorted([">=1.5.0", "<2"])
 
 
 def test_the_lowest_tested_minor_is_the_declared_floor() -> None:
@@ -58,12 +58,13 @@ def test_a_newer_core_minor_warns_with_the_versions_and_the_way_out(monkeypatch:
     _installed(monkeypatch, agent_framework_core="1.21.0")
     [message] = _untested_warnings()
     assert message.startswith("community-agent-framework-postgres has not been tested with agent-framework-core 1.21.0")
-    assert "(tested: 1.19, 1.20)" in message
+    assert "(tested: 1.20)" in message
+    assert "expected to work" in message
     assert "agent-framework-core<1.21" in message
     assert "filterwarnings" in message
 
 
-@pytest.mark.parametrize("installed", ["1.20.3", "1.20.0", "1.19.0", "1.18.2", "1.20.5rc1", "not-a-version"])
+@pytest.mark.parametrize("installed", ["1.20.3", "1.20.0", "1.19.0", "1.20.5rc1", "not-a-version"])
 def test_tested_older_and_unparseable_core_versions_do_not_warn(
     monkeypatch: pytest.MonkeyPatch, installed: str
 ) -> None:
@@ -80,8 +81,17 @@ def test_a_pre_release_of_a_newer_minor_warns(monkeypatch: pytest.MonkeyPatch) -
 def test_a_newer_ag_ui_minor_warns(monkeypatch: pytest.MonkeyPatch) -> None:
     _installed(monkeypatch, agent_framework_core="1.20.0", agent_framework_ag_ui="1.6.0")
     [message] = _untested_warnings()
-    assert "agent-framework-ag-ui 1.6.0 (tested: 1.4, 1.5)" in message
+    assert "agent-framework-ag-ui 1.6.0 (tested: 1.5)" in message
     assert "agent-framework-ag-ui<1.6" in message
+
+
+def test_a_newer_major_is_called_out_of_range_not_expected_to_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    _installed(monkeypatch, agent_framework_core="2.0.0")
+    [message] = _untested_warnings()
+    assert message.startswith("community-agent-framework-postgres has not been tested with agent-framework-core 2.0.0")
+    assert "outside the declared range and likely to break" in message
+    assert "agent-framework-core<2 " in message
+    assert "expected to work" not in message
 
 
 def test_without_ag_ui_only_core_is_checked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,7 +155,7 @@ def test_a_missing_private_name_is_named_in_the_import_error(monkeypatch: pytest
         with pytest.raises(ImportError) as info:
             importlib.reload(_framework)
         assert "filter_new_messages" in str(info.value)
-        assert ">=1.19.0,<2" in str(info.value) and "1.19, 1.20" in str(info.value)
+        assert ">=1.20.0,<2" in str(info.value) and "tested on 1.20;" in str(info.value)
     finally:
         monkeypatch.undo()
         importlib.reload(_framework)

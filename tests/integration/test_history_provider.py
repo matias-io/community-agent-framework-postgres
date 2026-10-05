@@ -59,18 +59,18 @@ async def test_undecodable_rows_are_skipped(
     assert _texts(await history.get_messages("s")) == ["good", "reply"]
 
 
-async def test_replay_rule_is_the_installed_maf_rule(history: PostgresHistoryProvider) -> None:
-    # MAF 1.20 keeps a repeated id-less input that 1.19 dropped as a replay; the provider follows the installed rule.
+async def test_a_repeated_input_is_kept_not_dropped_as_a_replay(history: PostgresHistoryProvider) -> None:
+    # The MAF 1.20 rule: a repeated id-less input is a new message. 1.19 dropped it, which is why 1.20 is the floor.
     def stored() -> list[Message]:
         return [Message(role="user", contents=["good"])]
 
     def incoming() -> list[Message]:
         return [Message(role="user", contents=["good"]), Message(role="user", contents=["next"])]
 
-    expected = _texts(stored() + _framework.filter_new_messages(stored(), incoming()))
+    assert _texts(_framework.filter_new_messages(stored(), incoming())) == ["good", "next"]
     await history.save_messages("s", stored())
     await history.save_messages("s", incoming())
-    assert _texts(await history.get_messages("s")) == expected
+    assert _texts(await history.get_messages("s")) == ["good", "good", "next"]
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:

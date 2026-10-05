@@ -4,31 +4,30 @@ Microsoft's own Cosmos DB and Redis packages import these same names from the
 same private modules. Keeping them here means an upstream rename breaks one
 file, and ``tests/unit/test_framework.py`` fails before a user notices.
 
-Verified against agent-framework-core 1.19.0 and 1.20.0 on 2 October 2026.
-Their signatures did not change, but 1.20 changed ``filter_new_messages``: when
-the stored history is one user message without an id, an incoming batch that
-starts with that same message is kept as a repeated input instead of dropped as
-a replay. ``PostgresHistoryProvider`` follows whichever rule is installed.
+Verified against agent-framework-core 1.20.0 on 4 October 2026. 1.20 is the
+floor because 1.19's ``filter_new_messages`` dropped any incoming message whose
+content matched one already stored, so a repeated "yes" was lost.
 """
 
 import re
 import warnings
 from importlib.metadata import PackageNotFoundError, version
 
-SUPPORTED_CORE = ">=1.19.0,<2"
+SUPPORTED_CORE = ">=1.20.0,<2"
 """The declared ``agent-framework-core`` range: MAF keeps breaking changes for major versions."""
 
-TESTED_CORE = ("1.19", "1.20")
+TESTED_CORE = ("1.20",)
 """The ``agent-framework-core`` minors this release was tested on (major.minor)."""
 
-TESTED_AG_UI = ("1.4", "1.5")
+TESTED_AG_UI = ("1.5",)
 """The ``agent-framework-ag-ui`` minors this release was tested on (major.minor)."""
 
 
 class UntestedAgentFrameworkWarning(UserWarning):
     """The installed Agent Framework is newer than any version this release was tested on.
 
-    It is expected to work, because Agent Framework keeps breaking changes for major versions.
+    A newer minor of a tested major is expected to work, because Agent Framework keeps breaking changes for major
+    versions. A newer major is outside the declared range and likely to break.
 
     The warning is emitted while the package is imported, so a filter must match the message prefix
     ``community-agent-framework-postgres has not been tested`` and be installed before the import. For example,
@@ -64,12 +63,22 @@ def warn_if_untested_agent_framework(stacklevel: int = 2) -> None:
         newest = max(filter(None, map(_major_minor, tested)))
         if current is None or current <= newest:
             continue
+        if current[0] > newest[0]:
+            advice = (
+                f" {distribution} {installed} is a new major version, outside the declared range and likely to break;"
+                f" pin {distribution}<{current[0]} and open an issue."
+            )
+        else:
+            advice = (
+                " It is expected to work, since Agent Framework keeps breaking changes for major versions;"
+                f" if something fails, pin {distribution}<{current[0]}.{current[1]} and open an issue."
+            )
         warnings.warn(
             UntestedAgentFrameworkWarning(
                 f"community-agent-framework-postgres has not been tested with {distribution} {installed}"
-                f" (tested: {', '.join(tested)}). It is expected to work, since Agent Framework keeps breaking"
-                f" changes for major versions; if something fails, pin {distribution}<{current[0]}.{current[1]} and"
-                " open an issue. To silence this warning, filter its message before the first import:"
+                f" (tested: {', '.join(tested)})."
+                f"{advice}"
+                " To silence this warning, filter its message before the first import:"
                 " warnings.filterwarnings('ignore', message='community-agent-framework-postgres has not been tested')."
             ),
             stacklevel=stacklevel + 1,

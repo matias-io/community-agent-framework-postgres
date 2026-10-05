@@ -18,7 +18,7 @@ def test_readme_names_every_public_store() -> None:
         "RetentionPolicy",
     ):
         assert name in readme, name
-    assert "agent-framework-core" in readme and "1.19" in readme
+    assert "agent-framework-core" in readme and "1.20" in readme
 
 
 def test_docs_pages_exist_and_are_linked_from_readme() -> None:
