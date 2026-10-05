@@ -78,26 +78,29 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 
 Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together. Dependabot (`.github/dependabot.yml`) checks the pins weekly and opens a pull request that does both.
 
-`ci.yml` runs the locked MAF versions on Python 3.11 to 3.14 against PostgreSQL 16 and 17. It also runs the newest MAF release the declared ranges allow on each Python version against PostgreSQL 17. All these jobs block a merge. `canary.yml` runs every Monday against the newest MAF release, ignoring the untested-version warning. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and publishes only if that passes.
+`ci.yml` runs the locked MAF versions on Python 3.11 to 3.14 against PostgreSQL 16 and 17. It also runs the newest MAF release the declared ranges allow on each Python version against PostgreSQL 17. All these jobs block a merge. `canary.yml` runs every Monday against the newest MAF release, ignoring the untested-version warning. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and uploads only if that passes and a reviewer approves.
 
 ## Releasing
 
-A release goes to PyPI from a tag, through `release.yml`. PyPI does not allow an uploaded distribution filename to be reused, even after that file is deleted, so check everything before the tag is pushed.
+A release goes to PyPI through `release.yml`, and only through two manual steps: publishing a GitHub Release, then approving the upload. Pushing a tag publishes nothing. PyPI never lets a version be uploaded twice, even after its files are deleted, so check everything before you approve.
 
 One-time setup:
 
-1. On PyPI, add a pending trusted publisher for the project `community-agent-framework-postgres`: owner `matias-io`, repository `community-agent-framework-postgres`, workflow `release.yml`, environment `pypi`. After the first upload it becomes the project's trusted publisher.
-2. On GitHub, create the environment `pypi` under Settings, Environments, and add yourself as a required reviewer, so every publish waits for your approval. A tag pushed by mistake then publishes nothing until you approve it.
+1. On PyPI, add a pending trusted publisher for the project `community-agent-framework-postgres`: owner `matias-io`, repository `community-agent-framework-postgres`, workflow `release.yml`, environment `pypi`. After the first upload it becomes the project's trusted publisher. Until this exists, no workflow can upload anything.
+2. On GitHub, create the environment `pypi` under Settings, Environments, and add yourself as a required reviewer. Every upload then waits for your approval, whichever commit's workflow asked for it.
+3. Optionally, add a tag ruleset under Settings, Rules that restricts who can create `v*` tags.
 
 For each release:
 
-1. On the release branch, set `project.version` in `pyproject.toml`, add the version's section and link reference to `CHANGELOG.md`, replace its `Unreleased` date with the publication date, update the tested versions in `_framework.py` and `docs/compatibility.md`, and point the README's links at the new tag (`blob/vX.Y.Z/`); `tests/unit/test_docs.py` checks the tag matches `project.version`.
+1. On the release branch, set `project.version` in `pyproject.toml`, add the version's section and link reference to `CHANGELOG.md` with the publication date, update the tested versions in `_framework.py` and `docs/compatibility.md`, and point the README's links at the new tag (`blob/vX.Y.Z/`). `tests/unit/test_docs.py` checks the date and that the links match `project.version`.
 2. Push the branch and open a pull request against `main`.
 3. Wait for the full CI matrix to pass, including PostgreSQL 16 and the `latest` MAF leg.
 4. Merge the pull request.
-5. Create an annotated tag on the merge commit that matches `project.version`, for example `git tag -a v0.1.1 -m "v0.1.1"`.
-6. Push only the new release tag, never `git push --tags` or `--follow-tags`: `release.yml` publishes on any `v*` tag it sees.
-7. Push the tag: `git push origin v0.1.1`. This starts `release.yml`, which checks the tag against `project.version`, runs the full suite against PostgreSQL 17, builds, and publishes.
+5. Tag the merge commit and push only that tag: `git tag -a v0.1.1 -m "v0.1.1"`, then `git push origin v0.1.1`. Never `git push --tags` or `--follow-tags`.
+6. On GitHub, draft a release for the tag and publish it. That starts `release.yml`, which checks that the tag is `v` plus `project.version`, runs the full suite against PostgreSQL 17 and builds.
+7. Approve the `publish` job when GitHub asks. Reject it if anything looks wrong; nothing reaches PyPI until you approve.
 8. Open the project page on PyPI and check the README renders: links resolve to the tag on GitHub, and the tables display.
 
-Optional dry run on TestPyPI before step 7: register the same pending publisher on test.pypi.org, then build locally with `uv build` and upload with `uv publish --publish-url https://test.pypi.org/legacy/` using a TestPyPI token, or add a job with `repository-url: https://test.pypi.org/legacy/` to the publish action. A version on TestPyPI cannot be reused either.
+0.1.0 was never published. Its commit carries the local tag `archive/0.1.0`, and its old `release.yml` still publishes on a `v*` tag push, so never give that commit a `v*` tag.
+
+Optional dry run on TestPyPI before step 6: register the same pending publisher on test.pypi.org, then build locally with `uv build` and upload with `uv publish --publish-url https://test.pypi.org/legacy/` using a TestPyPI token, or add a job with `repository-url: https://test.pypi.org/legacy/` to the publish action. A version on TestPyPI cannot be reused either.
