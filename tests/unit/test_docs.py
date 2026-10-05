@@ -40,7 +40,8 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
 
 def test_changelog_has_the_first_release() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## [Unreleased]" in changelog or "## [0.1.0]" in changelog
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert re.search(rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", changelog, flags=re.MULTILINE)
 
 
 def _markdown_links(text: str) -> list[str]:
