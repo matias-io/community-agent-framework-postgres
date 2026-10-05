@@ -87,7 +87,7 @@ A release goes to PyPI from a tag, through `release.yml`. PyPI does not allow an
 One-time setup:
 
 1. On PyPI, add a pending trusted publisher for the project `community-agent-framework-postgres`: owner `matias-io`, repository `community-agent-framework-postgres`, workflow `release.yml`, environment `pypi`. After the first upload it becomes the project's trusted publisher.
-2. On GitHub, create the environment `pypi` under Settings, Environments. Adding yourself as a required reviewer makes every publish wait for approval.
+2. On GitHub, create the environment `pypi` under Settings, Environments, and add yourself as a required reviewer, so every publish waits for your approval. A tag pushed by mistake then publishes nothing until you approve it.
 
 For each release:
 
@@ -96,7 +96,7 @@ For each release:
 3. Wait for the full CI matrix to pass, including PostgreSQL 16 and the `latest` MAF leg.
 4. Merge the pull request.
 5. Create an annotated tag on the merge commit that matches `project.version`, for example `git tag -a v0.1.1 -m "v0.1.1"`.
-6. Do not push the local `v0.1.0` tag. `release.yml` at that commit publishes on any `v*` tag, so pushing it would publish 0.1.0 to PyPI. Push only the new release tag.
+6. Push only the new release tag, never `git push --tags` or `--follow-tags`: `release.yml` publishes on any `v*` tag it sees.
 7. Push the tag: `git push origin v0.1.1`. This starts `release.yml`, which checks the tag against `project.version`, runs the full suite against PostgreSQL 17, builds, and publishes.
 8. Open the project page on PyPI and check the README renders: links resolve to the tag on GitHub, and the tables display.
 

@@ -37,7 +37,7 @@ Checkpoints use the same hybrid JSON and restricted pickle encoding as MAF's `Fi
 
 ## Behaviour
 
-- `save` encodes the checkpoint and decodes it again under this store's allowed types before it writes. A checkpoint that would not restore raises `WorkflowCheckpointException` and nothing is written. MAF's `FileCheckpointStorage` 1.19 does the same check.
+- `save` encodes the checkpoint and decodes it again under this store's allowed types before it writes. A checkpoint that would not restore raises `WorkflowCheckpointException` and nothing is written. MAF's `FileCheckpointStorage` does the same check.
 - Without `scope`, every instance with the same `application_id` shares checkpoints for a `workflow_name`. MAF's protocol only knows `workflow_name`. When a workflow runs once per conversation, pass the conversation id as `scope`.
 - Saving an existing `checkpoint_id` again replaces the row, as MAF's in-memory and file storage do.
 - A timestamp without a time zone is read as UTC. A timestamp `datetime.fromisoformat` cannot parse raises `WorkflowCheckpointException`.

@@ -1,6 +1,6 @@
 # Sessions
 
-`PostgresSessionStore` is a MAF `SessionStore`. It stores one `AgentSession` snapshot per caller-chosen id in `af_sessions`. MAF marks `SessionStore` as experimental. This store follows its interface in `agent-framework-core` 1.19 and 1.20.
+`PostgresSessionStore` is a MAF `SessionStore`. It stores one `AgentSession` snapshot per caller-chosen id in `af_sessions`. MAF marks `SessionStore` as experimental, so its interface may change in a MAF minor. This store follows it as of `agent-framework-core` 1.20. MAF does not emit its `ExperimentalWarning` for this class, because MAF treats every module whose name starts with `agent_framework_` as its own.
 
 ## Columns
 

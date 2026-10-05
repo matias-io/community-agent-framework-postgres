@@ -10,22 +10,26 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 
 | 0.1.1 | Declared | Tested |
 |---|---|---|
-| `agent-framework-core` | `>=1.19.0,<2` | 1.19.x, 1.20.x |
-| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.4.0,<2` | 1.4.x, 1.5.x |
-| Python | `>=3.11` | 3.11 to 3.14; 3.15.0b4 smoke-tested, not supported yet |
+| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0 |
+| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0 |
+| Python | `>=3.11` | 3.11, 3.12, 3.13, 3.14 |
 | PostgreSQL | | 16, 17 |
-| psycopg | `>=3.3.5,<4` | 3.3.5 or later, below 4 |
+| psycopg | `>=3.3.5,<4` | 3.3.6 |
 
-With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) for the support policy and how to silence it. 0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed. 0.1.1 supersedes it and is intended as the first PyPI release.
+pip and uv refuse a MAF version outside the declared range. A newer minor inside it, such as `agent-framework-core` 1.21, installs, and importing the package emits an `UntestedAgentFrameworkWarning` that names the tested version. It is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and how to silence the warning.
+
+MAF 1.19 and older are not supported. Their history dedupe drops any new message that matches one already stored, so a user who answers "yes" twice loses the second "yes". MAF 1.20 fixed that, so 1.20 is the floor.
+
+0.1.1 is the first release on PyPI. 0.1.0 was never published.
 
 ## What it implements
 
 | Class | MAF interface | Extra | Conditions |
 |---|---|---|---|
-| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with the installed MAF's own rule, which changed in 1.20; tested on MAF 1.19 and 1.20 |
+| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with MAF's own `filter_new_messages` |
 | `PostgresSessionStore` | `SessionStore` | none | MAF marks `SessionStore` experimental |
 | `PostgresCheckpointStorage` | `CheckpointStorage` | none | Decodes only MAF's safe types and its own; `allowed_checkpoint_types` adds more |
-| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store`; tested on `agent-framework-ag-ui` 1.4 and 1.5 |
+| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store` |
 | `PostgresDocumentStore`, `PostgresLeases` | none (this package's own) | none | |
 | `PostgresPersistence` | none (creates the stores above over one pool) | none | |
 | Microsoft Entra ID sign-in (`credential=`) | none | `azure` | Azure Database for PostgreSQL with Entra authentication |
@@ -288,11 +292,11 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 
 ## Retention
 
-Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
+Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. Until a purge runs, reads still return expired rows. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
 
 ## Private Agent Framework imports
 
-The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md).
+The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB package imports all three, and its Redis package imports `filter_new_messages`. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md).
 
 ## Development
 

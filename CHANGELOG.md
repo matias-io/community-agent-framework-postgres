@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - Unreleased
+## [0.1.1] - 2026-10-04
+
+The first release on PyPI.
 
 ### Added
 
@@ -14,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Declared MAF range: `agent-framework-core>=1.19.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.4.0,<2`. Tested on `agent-framework-core` 1.19 and 1.20 and on `agent-framework-ag-ui` 1.4 and 1.5.
+- Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and `agent-framework-ag-ui` 1.5.0.
 
 ### Fixed
 
@@ -23,14 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A string with a lone surrogate now raises `ValueError` before any SQL runs, instead of a `UnicodeEncodeError` from inside psycopg.
 - `PurgeReport` can be pickled, copied and passed to `dataclasses.asdict`, and its `counts` is read-only: it is a mapping, not a `dict`, so no `dict` method can change it.
 
-### Notes
-
-- 0.1.1 is intended as the first PyPI release. 0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed; 0.1.1 supersedes it.
-- MAF 1.20 changed its own replay rule, and `PostgresHistoryProvider` follows the installed MAF. When the stored history is a single user message without an id and the next batch starts with that same message, 1.20 stores the repeat; 1.19 drops it.
-
 ## [0.1.0] - 2026-10-01
 
-Unpublished snapshot at commit `50c91c5`. Its tag is local and must not be pushed.
+Never published to PyPI. It declared `agent-framework-core>=1.19.0,<2`.
 
 ### Added
 
