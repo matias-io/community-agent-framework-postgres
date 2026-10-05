@@ -18,7 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - run: uv sync --all-extras
+      # --locked fails the job when uv.lock no longer matches pyproject.toml, instead of re-locking silently.
+      - run: uv sync --locked --all-extras
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
@@ -52,7 +53,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --all-extras
+      - run: uv sync --locked --all-extras
       # Latest: re-resolve the two MAF packages to the newest release the
       # declared ranges allow, then sync that lock into the same .venv the
       # test step runs in. `uv run` below keeps the upgraded lock. The ranges
