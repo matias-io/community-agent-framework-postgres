@@ -1,6 +1,7 @@
 # community-agent-framework-postgres
+A community-maintained PostgreSQL persistence implementation for Microsoft Agent Framework (MAF), supporting agent chat history, sessions, workflow checkpoints, AG-UI snapshots, and durable JSON documents.
 
-PostgreSQL storage for Microsoft Agent Framework (MAF). The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresDocumentStore` for JSON documents with revisions and leases. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
+The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresDocumentStore` for JSON documents with revisions and leases. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
 
 ## Status
 
