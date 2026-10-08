@@ -29,7 +29,7 @@ The first release on PyPI.
 
 ### Removed
 
-- The CLI's `--connection-string`; set `POSTGRES_CONNECTION_STRING`, which never shows in `ps`.
+- The CLI's `--connection-string`; set `POSTGRES_CONNECTION_STRING`, which keeps the password out of the command line that `ps` shows and out of shell history.
 
 ### Fixed
 

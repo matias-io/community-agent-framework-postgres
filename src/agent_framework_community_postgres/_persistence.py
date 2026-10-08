@@ -15,7 +15,7 @@ from ._entra import EntraCredential
 from ._framework import log_untested_once
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
-from ._migrations import MigrationReport, current_version, migrate, pending_versions
+from ._migrations import LOCK_TIMEOUT, MigrationReport, current_version, migrate, pending_versions
 from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
 from ._session_store import PostgresSessionStore
 
@@ -83,7 +83,7 @@ class PostgresPersistence:
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         await self.close()
 
-    async def migrate(self, *, lock_timeout: timedelta = timedelta(seconds=30)) -> MigrationReport:
+    async def migrate(self, *, lock_timeout: timedelta = LOCK_TIMEOUT) -> MigrationReport:
         """Create or upgrade the schema; each version's DDL gives up after ``lock_timeout`` waiting on a lock."""
         return await migrate(self._client, self.names, lock_timeout=lock_timeout)
 

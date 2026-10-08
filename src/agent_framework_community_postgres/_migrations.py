@@ -13,11 +13,11 @@ from ._client import ClientHandle, PostgresStorageError, TableNames
 
 Migration = Callable[[TableNames], Sequence[sql.Composed]]
 
-_LOCK_TIMEOUT = timedelta(seconds=30)
+LOCK_TIMEOUT = timedelta(seconds=30)
 
 
 def _lock_timeout_literal(lock_timeout: timedelta) -> sql.Literal:
-    milliseconds = int(lock_timeout.total_seconds() * 1000)
+    milliseconds = lock_timeout // timedelta(milliseconds=1)
     if milliseconds < 1:
         # PostgreSQL reads a lock_timeout of 0 as "wait forever", the opposite of what a caller means.
         raise ValueError("lock_timeout must be at least one millisecond.")
@@ -145,7 +145,7 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
         raise ValueError(f"versions must be between 1 and {len(MIGRATIONS)}.")
     if not chosen:
         return ""
-    timeout = sql.SQL("SET LOCAL lock_timeout = {}").format(_lock_timeout_literal(_LOCK_TIMEOUT)).as_string()
+    timeout = sql.SQL("SET LOCAL lock_timeout = {}").format(_lock_timeout_literal(LOCK_TIMEOUT)).as_string()
     parts = [_version_table(names).as_string() + ";"]
     for version in chosen:
         parts.append(f"-- version {version}")
@@ -193,7 +193,7 @@ async def pending_versions(client: ClientHandle, names: TableNames) -> list[int]
 
 
 async def migrate(
-    client: ClientHandle, names: TableNames, *, lock_timeout: timedelta = _LOCK_TIMEOUT
+    client: ClientHandle, names: TableNames, *, lock_timeout: timedelta = LOCK_TIMEOUT
 ) -> MigrationReport:
     """Apply every pending migration, one transaction each, serialized across processes by an advisory lock.
 

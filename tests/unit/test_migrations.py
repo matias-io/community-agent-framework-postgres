@@ -66,6 +66,20 @@ def test_rendered_sql_sets_a_lock_timeout_per_version() -> None:
     assert text.index("BEGIN;") < text.index("SET LOCAL lock_timeout") < text.index('CREATE TABLE "public"."af_history')
 
 
+@pytest.mark.parametrize(
+    ("lock_timeout", "rendered"),
+    [
+        (timedelta(milliseconds=1001), "'1001ms'"),
+        (timedelta(milliseconds=1), "'1ms'"),
+        (timedelta(seconds=30), "'30000ms'"),
+    ],
+)
+def test_lock_timeout_renders_exact_milliseconds(lock_timeout: timedelta, rendered: str) -> None:
+    from agent_framework_community_postgres._migrations import _lock_timeout_literal
+
+    assert _lock_timeout_literal(lock_timeout).as_string() == rendered
+
+
 @pytest.mark.parametrize("lock_timeout", [timedelta(0), timedelta(microseconds=999), timedelta(seconds=-1)])
 async def test_migrate_refuses_a_lock_timeout_postgres_would_read_as_none(lock_timeout: timedelta) -> None:
     handle = cast(ClientHandle, object())  # never reached: the check runs before any connection
