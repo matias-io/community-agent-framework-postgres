@@ -18,6 +18,7 @@ The first release on PyPI.
 - `compatibility()` and `Compatibility`: the installed `agent-framework-core` and `agent-framework-ag-ui` next to the tested minors. The first store or hub built in a process logs one warning when a newer minor is installed. Importing the package has no side effects.
 - `migrate(lock_timeout=)`, `PostgresPersistence.current_version()`, `migrate --print --from-version N`.
 - `tenant_id` on `PostgresCheckpointStorage` and `PostgresPersistence.checkpoint_storage()`, part of the checkpoint row key next to `scope`.
+- `PostgresHistoryProvider.list_sessions(limit=, after=)` pages session ids by keyset: `after` starts a page after the given id.
 
 ### Changed
 
@@ -32,6 +33,10 @@ The first release on PyPI.
 - `list_checkpoint_ids` reads ids without decoding, so it returns every id, including one whose row fails to decode.
 - `PostgresSessionStore.get` raises `ValueError` when the stored snapshot has an unsupported `snapshot_version` or is not a JSON object, as MAF's `FileSessionStore` does for an unreadable file, instead of returning `None` as if the session were absent. A purged session still returns `None`.
 - `PostgresAGUIThreadSnapshotStore.clear` follows the AG-UI protocol signature, `clear(*, scope=None)`: no scope removes every snapshot of the application, a scope removes that scope's. An empty scope raises `ValueError`.
+- History saves and `clear` take the session's advisory lock inside a `READ COMMITTED` transaction, so concurrent saves no longer duplicate history on a server whose default isolation level is `REPEATABLE READ`. The lock key now includes the schema and table prefix, and `clear` no longer runs in the middle of a save.
+- A history save reads only the newest stored messages, as many as it was given, to deduplicate, instead of the whole session. The result is the same under MAF 1.20's `filter_new_messages`, and a save no longer slows down as a session grows.
+- A history save raises `PostgresStorageError` when a stored message it needs for deduplication no longer deserializes, instead of skipping it and possibly storing a replay twice. `get_messages` still skips such rows with a warning.
+- History retention keeps a session whole: a purge deletes a session's messages only once all of them have expired, instead of deleting an active session's oldest messages.
 
 ### Removed
 

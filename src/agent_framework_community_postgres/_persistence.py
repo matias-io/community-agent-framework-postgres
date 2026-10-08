@@ -13,7 +13,7 @@ from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
 from ._entra import EntraCredential
 from ._framework import log_untested_once
-from ._history_provider import PostgresHistoryProvider
+from ._history_provider import PostgresHistoryProvider, whole_session_expired
 from ._leases import PostgresLeases
 from ._migrations import LOCK_TIMEOUT, MigrationReport, current_version, migrate, pending_versions
 from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
@@ -151,30 +151,32 @@ class PostgresPersistence:
 
         A row is expired when its ``expires_at``, stamped by whichever policy wrote it, has
         passed; the hub needs no policy of its own. ``mode`` defaults to the hub policy's mode.
-        Each table is purged in batches, one transaction per batch.
+        Each table is purged in batches, one transaction per batch. A history session is purged
+        only once every one of its messages has expired.
         """
         chosen = RetentionPolicy(mode=mode).mode if mode is not None else self.retention.mode
         where = sql.SQL("application_id = %(app)s")
         params = {"app": self.application_id}
-        plan: list[tuple[str, sql.Composable | None, bool]] = [
-            ("history_messages", None, False),
-            ("sessions", sql.SQL("snapshot = NULL"), True),
-            ("checkpoints", None, False),
+        plan: list[tuple[str, sql.Composable, sql.Composable | None, bool]] = [
+            ("history_messages", whole_session_expired(self.names.table("history_messages")), None, False),
+            ("sessions", where, sql.SQL("snapshot = NULL"), True),
+            ("checkpoints", where, None, False),
             (
                 "thread_snapshots",
+                where,
                 sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
                 True,
             ),
-            ("leases", None, False),
+            ("leases", where, None, False),
         ]
         counts: dict[str, int] = {}
         # One transaction per batch: row locks are never held across tables, so a long purge cannot
         # deadlock with, say, a history trim on the same session.
-        for table, tombstone, tombstone_allowed in plan:
+        for table, table_where, tombstone, tombstone_allowed in plan:
             counts[f"{self.names.prefix}{table}"] = await purge_rows(
                 self._client,
                 table=self.names.table(table),
-                where=where,
+                where=table_where,
                 params=params,
                 mode=chosen if tombstone_allowed else "delete",
                 tombstone=tombstone,

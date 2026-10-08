@@ -1,13 +1,15 @@
 import asyncio
 from contextlib import AbstractAsyncContextManager
+from datetime import timedelta
 from typing import Any
 
 import pytest
+from agent_framework import Message
 from psycopg import AsyncConnection, sql
 
 from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, TableNames
-from agent_framework_community_postgres._retention import purge_rows
+from agent_framework_community_postgres._retention import RetentionPolicy, purge_rows
 
 pytestmark = pytest.mark.integration
 
@@ -115,3 +117,24 @@ async def test_batch_size_below_one_is_rejected(client: ClientHandle, migrated: 
             tombstone=None,
             batch_size=0,
         )
+
+
+async def test_purge_keeps_an_active_session_whole(persistence: PostgresPersistence) -> None:
+    provider = persistence.history_provider(retention=RetentionPolicy(ttl=timedelta(hours=1)))
+    history = persistence.names.table("history_messages")
+    await provider.save_messages(
+        "s", [Message(role="user", contents=["old"]), Message(role="assistant", contents=["old-reply"])]
+    )
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(
+            sql.SQL("UPDATE {h} SET expires_at = now() - interval '1 minute' WHERE session_id = 's'").format(h=history)
+        )
+    await provider.save_messages("s", [Message(role="user", contents=["new"])])
+    assert (await provider.purge()).total == 0
+    assert (await persistence.purge()).total == 0
+    assert [m.text for m in await provider.get_messages("s")] == ["old", "old-reply", "new"]
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(
+            sql.SQL("UPDATE {h} SET expires_at = now() - interval '1 minute' WHERE session_id = 's'").format(h=history)
+        )
+    assert (await provider.purge()).total == 3

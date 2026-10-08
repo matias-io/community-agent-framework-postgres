@@ -20,18 +20,18 @@ A `ttl` of zero or less, or another `mode`, raises `ValueError`. Pass the policy
 Each write sets `expires_at` to the database's `now()` plus `ttl`. What that means depends on the table.
 
 - `af_sessions` and `af_thread_snapshots` keep one row per key and rewrite it. Expiry counts from the last write to that key.
-- `af_history_messages` adds one row per message. Each message expires a TTL after it was inserted, and later messages do not extend it. An active session loses its oldest messages once they are older than the TTL.
+- `af_history_messages` adds one row per message. Each message's `expires_at` is a TTL after it was inserted and is never rewritten. A purge deletes a session's messages only once its newest message has expired, so an active session keeps its whole transcript.
 - `af_checkpoints` adds one row per checkpoint. Each checkpoint expires a TTL after its save, so a long-running workflow loses its oldest checkpoints first. Saving the same `checkpoint_id` again resets that row.
 
 Rows written while `ttl` was `None` have no `expires_at` and are never purged. Changing the policy does not touch existing rows until they are written again. A purge acts on the `expires_at` already stored, so the object that runs it needs no policy of its own.
 
 ## What a purge does
 
-A purge acts on rows whose `expires_at` has passed.
+A purge acts on rows whose `expires_at` has passed. A history session is purged only once its newest message has expired; until then none of its messages are touched.
 
 | Table | Tombstone mode | Delete mode |
 |---|---|---|
-| `af_history_messages` | Deleted | Deleted |
+| `af_history_messages` | Deleted, a whole session at a time | Deleted, a whole session at a time |
 | `af_sessions` | `snapshot` set to `NULL` | Deleted |
 | `af_checkpoints` | Deleted | Deleted |
 | `af_thread_snapshots` | `messages`, `state`, `interrupt`, `session_state` set to `NULL` | Deleted |
