@@ -21,27 +21,20 @@ The package declares two ranges and tests a narrower one.
 
 The declared range assumes Agent Framework follows semantic versioning and keeps breaking changes for major versions. Microsoft's own integrations make the same assumption: `agent-framework-azure-cosmos` and `agent-framework-redis` declare `agent-framework-core>=1.19.0,<2`. This package starts at 1.20 instead, for the reason under [Behaviour MAF owns](#behaviour-maf-owns). Microsoft releases its packages in lockstep with MAF. This package cannot, and MAF ships a minor every one to two weeks, so a range that listed only tested minors would block every new MAF release until a patch release here caught up. Instead, a weekly canary workflow runs the suite against the newest MAF release, and each minor that passes is added to the tested range in the next release.
 
-### The untested-version warning
+### The compatibility check
 
-When the installed `agent-framework-core`, or `agent-framework-ag-ui` if installed, is a newer major.minor than the newest tested one, importing the package emits one `UntestedAgentFrameworkWarning` naming the installed and tested versions. Older and tested versions never warn. Pre-release and local version parts are ignored: only the numeric major.minor is compared.
-
-For a newer minor, the warning means the combination has not been run here, not that it is known to fail, and it is expected to work. For a new major, which pip and uv only install when forced, the warning says it is outside the declared range and likely to break. The warning fires while the package is imported, so a filter has to be in place before the first import, and it matches the message, which always starts with `community-agent-framework-postgres has not been tested`:
+`compatibility()` returns a `Compatibility` with the installed and tested versions. `core_installed` and `core_tested` cover `agent-framework-core`, and `ag_ui_installed` and `ag_ui_tested` cover `agent-framework-ag-ui`; `ag_ui_installed` is `None` when the `ag-ui` extra is not installed. `untested` names each distribution whose installed major.minor is newer than the newest tested one, and `out_of_range` names each one whose major is newer than the tested major. Both are empty when every installed version is covered. Older and tested versions are never untested. Pre-release and local version parts are ignored: only the numeric major.minor is compared.
 
 ```python
-import warnings
+from agent_framework_community_postgres import compatibility
 
-warnings.filterwarnings("ignore", message="community-agent-framework-postgres has not been tested")
-
-import agent_framework_community_postgres  # noqa: E402
+report = compatibility()
+print(report.core_installed, report.core_tested, report.untested)
 ```
 
-From the environment:
+The first store or `PostgresPersistence` built in a process logs one warning for each untested distribution on the `agent_framework_community_postgres` logger, naming the installed and tested versions. Later stores log nothing. Importing the package has no side effects, so `python -W error` and a pytest `filterwarnings = ["error"]` keep working on any version the declared range allows.
 
-```bash
-PYTHONWARNINGS="ignore:community-agent-framework-postgres has not been tested" python app.py
-```
-
-In pytest, add `"ignore:community-agent-framework-postgres has not been tested"` to `filterwarnings`, or pass it with `-W`. Once the package is imported, the category is `agent_framework_community_postgres.UntestedAgentFrameworkWarning`, and `warnings.filterwarnings("ignore", category=UntestedAgentFrameworkWarning)` silences any later check, for example after `importlib.reload`.
+For a newer minor, the warning means the combination has not been run here, not that it is known to fail, and it is expected to work. For a new major, which pip and uv only install when forced, the warning says it is outside the declared range and likely to break.
 
 ### If a newer MAF breaks something
 

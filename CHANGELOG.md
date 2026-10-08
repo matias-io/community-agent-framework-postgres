@@ -14,7 +14,7 @@ The first release on PyPI.
 - The `azure` extra, which installs `azure-identity` and `aiohttp`, the async transport the `azure.identity.aio` credentials need.
 - `PostgresStorageError.sqlstate` and `.retryable`.
 - `pool_kwargs` on every store and the hub.
-- `UntestedAgentFrameworkWarning`, emitted once at import when the installed `agent-framework-core` or `agent-framework-ag-ui` is a newer minor than this release was tested on. See `docs/compatibility.md` for how to silence it.
+- `compatibility()` and `Compatibility`: the installed `agent-framework-core` and `agent-framework-ag-ui` next to the tested minors. The first store or hub built in a process logs one warning when a newer minor is installed. Importing the package has no side effects.
 
 ### Changed
 

@@ -11,6 +11,7 @@ from psycopg import sql
 from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
 from ._entra import EntraCredential
+from ._framework import log_untested_once
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
 from ._migrations import MigrationReport, migrate, pending_versions
@@ -48,6 +49,7 @@ class PostgresPersistence:
         retention: RetentionPolicy | None = None,
         pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
+        log_untested_once()
         self.application_id = require_text(application_id, "application_id")
         self.names = TableNames(schema=schema, prefix=table_prefix)
         self.retention = retention or RetentionPolicy()

@@ -17,7 +17,7 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 | PostgreSQL | | 16, 17 |
 | psycopg | `>=3.3.5,<4` | 3.3.6 |
 
-pip and uv refuse a MAF version outside the declared range. A newer minor inside it, such as `agent-framework-core` 1.21, installs, and importing the package emits an `UntestedAgentFrameworkWarning` that names the tested version. It is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and how to silence the warning.
+pip and uv refuse a MAF version outside the declared range. A newer minor inside it, such as `agent-framework-core` 1.21, installs. The package then logs one warning the first time a store or hub is built, and `compatibility()` returns the installed and tested versions for a diagnostics command. It is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and the compatibility check.
 
 MAF 1.19 and older are not supported. Their history dedupe drops any new message that matches one already stored, so a user who answers "yes" twice loses the second "yes". MAF 1.20 fixed that, so 1.20 is the floor.
 

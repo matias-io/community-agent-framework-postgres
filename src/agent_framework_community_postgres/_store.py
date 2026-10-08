@@ -16,6 +16,7 @@ from ._client import (
     require_text,
 )
 from ._entra import EntraCredential
+from ._framework import log_untested_once
 from ._retention import RetentionPolicy
 
 
@@ -34,6 +35,7 @@ class BaseStore:
         retention: RetentionPolicy | None,
         pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
+        log_untested_once()
         self.application_id = require_text(application_id, "application_id")
         self._names = TableNames(schema=schema, prefix=table_prefix)
         self._client: ClientHandle = create_client(
