@@ -78,7 +78,7 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
     runner.run(main())
 ```
 
-It prints `1 None` and then `[{'title': 'first'}]`.
+It prints `1 None`.
 
 ## Running purges on a schedule
 
