@@ -24,6 +24,20 @@ logger = logging.getLogger(__name__)
 _FIRST_DELAY = 0.1
 _MAX_DELAY = 2.0
 _RELEASE_SECONDS = 5.0
+# Releases still running after their bound; the event loop keeps only weak references to tasks.
+_late_releases: set[asyncio.Task[None]] = set()
+
+
+async def _release_after_failure(lease: Lease) -> None:
+    """Release after a block raised, logging a failure here so the task never ends with an exception.
+
+    A shielded task that fails after its waiter gave up is otherwise logged by asyncio itself, with the
+    traceback, whatever its done callbacks retrieve.
+    """
+    try:
+        await lease.release()
+    except Exception:
+        logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
 
 
 class Lease:
@@ -130,10 +144,15 @@ class PostgresLeases(BaseStore):
         except BaseException:
             # The block may have been cancelled; the release still runs, shielded and bounded, so a slow
             # database cannot hold a cancelling task. An unreleased lease frees itself on expiry.
+            release = asyncio.ensure_future(_release_after_failure(lease))
+            _late_releases.add(release)
+            release.add_done_callback(_late_releases.discard)
             try:
-                await asyncio.wait_for(asyncio.shield(lease.release()), timeout=_RELEASE_SECONDS)
-            except Exception:
-                logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
+                await asyncio.wait_for(asyncio.shield(release), timeout=_RELEASE_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "A lease release did not finish in time after its block raised; it continues in the background."
+                )
             raise
         await lease.release()
 

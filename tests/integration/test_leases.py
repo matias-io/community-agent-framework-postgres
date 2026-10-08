@@ -1,11 +1,12 @@
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
 
-from agent_framework_community_postgres import PostgresPersistence
+from agent_framework_community_postgres import PostgresPersistence, _leases
 from agent_framework_community_postgres._client import (
     ClientHandle,
     LeaseLost,
@@ -13,7 +14,7 @@ from agent_framework_community_postgres._client import (
     PostgresStorageError,
     TableNames,
 )
-from agent_framework_community_postgres._leases import PostgresLeases
+from agent_framework_community_postgres._leases import Lease, PostgresLeases
 
 pytestmark = pytest.mark.integration
 
@@ -189,3 +190,59 @@ async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPers
     with pytest.raises(asyncio.CancelledError):
         await task
     assert await leases.try_acquire("r", owner="other", ttl=timedelta(seconds=1)) is not None
+
+
+async def _cancel_while_holding(leases: PostgresLeases, resource: str) -> float:
+    """Cancel a task inside ``acquire`` and return how long the cancellation took to arrive."""
+    entered = asyncio.Event()
+
+    async def hold() -> None:
+        async with leases.acquire(resource, owner="o", ttl=timedelta(seconds=30)):
+            entered.set()
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(hold())
+    await entered.wait()
+    started = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    return time.monotonic() - started
+
+
+async def test_a_slow_release_holds_a_cancelled_task_only_for_the_bound(
+    leases: PostgresLeases, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def slow_release(self: Lease) -> None:
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(_leases, "_RELEASE_SECONDS", 0.2)
+    monkeypatch.setattr(Lease, "release", slow_release)
+    with caplog.at_level(logging.WARNING):
+        elapsed = await _cancel_while_holding(leases, "threads/slow")
+        assert elapsed < 0.5
+        assert any("did not finish" in r.getMessage() for r in caplog.records if r.name == _leases.__name__)
+        await asyncio.sleep(1)
+
+
+@pytest.mark.parametrize(("bound", "warnings"), [(5.0, 1), (0.1, 2)], ids=["within-bound", "after-bound"])
+async def test_a_failing_release_logs_only_through_the_package_logger(
+    leases: PostgresLeases,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    bound: float,
+    warnings: int,
+) -> None:
+    async def failing_release(self: Lease) -> None:
+        await asyncio.sleep(0.3)
+        raise RuntimeError("release failed")
+
+    monkeypatch.setattr(_leases, "_RELEASE_SECONDS", bound)
+    monkeypatch.setattr(Lease, "release", failing_release)
+    with caplog.at_level(logging.WARNING):
+        await _cancel_while_holding(leases, "threads/failing")
+        await asyncio.sleep(0.5)
+    assert not [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR]
+    package = [r for r in caplog.records if r.name == _leases.__name__ and r.levelno == logging.WARNING]
+    assert len(package) == warnings
+    assert sum("Could not release" in r.getMessage() for r in package) == 1
