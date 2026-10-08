@@ -14,7 +14,6 @@ def test_readme_names_every_public_store() -> None:
         "PostgresSessionStore",
         "PostgresCheckpointStorage",
         "PostgresAGUIThreadSnapshotStore",
-        "PostgresDocumentStore",
         "RetentionPolicy",
     ):
         assert name in readme, name
@@ -28,7 +27,7 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
         "sessions",
         "checkpoints",
         "thread-snapshots",
-        "documents-and-leases",
+        "leases",
         "retention",
         "migrations",
         "compatibility",

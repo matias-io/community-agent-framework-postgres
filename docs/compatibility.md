@@ -74,7 +74,7 @@ Every payload is stored as PostgreSQL `jsonb`, which changes a few values.
 - A float of about `1e16` or more comes back as an `int`.
 - `-0.0` comes back as `0.0`.
 - `nan` and infinity are not JSON. Every store refuses them with `ValueError` before any SQL runs, as it does a circular reference or any value `json` cannot encode.
-- These errors name the field, for example `Document payload`, and the Python error type. They never quote the value.
+- These errors name the field, for example `Session state`, and the Python error type. They never quote the value.
 
 Ordinary strings, integers, floats, booleans, lists and objects round-trip exactly.
 

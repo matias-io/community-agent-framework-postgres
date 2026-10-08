@@ -75,7 +75,6 @@ async def closed_hub() -> AsyncIterator[PostgresPersistence]:
 def _writes(hub: PostgresPersistence, bad: object) -> list[Callable[[], Awaitable[object]]]:
     session = AgentSession()
     session.state["bad"] = bad
-    documents = hub.document_store(collection="c")
     checkpoint = WorkflowCheckpoint(
         workflow_name="wf",
         graph_signature_hash="sig",
@@ -86,8 +85,6 @@ def _writes(hub: PostgresPersistence, bad: object) -> list[Callable[[], Awaitabl
     )
     return [
         lambda: hub.session_store().set("s", session),
-        lambda: documents.put(scope="s", key="k", payload={"bad": bad}),
-        lambda: documents.put(scope="s", key="k", payload={}, metadata={"bad": bad}),
         lambda: (
             hub.history_provider().save_messages("s", [Message(role="user", contents=[str(bad)])])
             if isinstance(bad, str)
@@ -103,7 +100,7 @@ def _writes(hub: PostgresPersistence, bad: object) -> list[Callable[[], Awaitabl
 
 
 @pytest.mark.parametrize("bad", BAD_VALUES)
-@pytest.mark.parametrize("index", range(6))
+@pytest.mark.parametrize("index", range(4))
 async def test_every_store_refuses_before_any_sql(closed_hub: PostgresPersistence, bad: object, index: int) -> None:
     with pytest.raises(ValueError) as info:
         await _writes(closed_hub, bad)[index]()

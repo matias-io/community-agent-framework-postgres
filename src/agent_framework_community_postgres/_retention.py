@@ -20,7 +20,7 @@ class RetentionPolicy:
     """How long rows live after their last write and what ``purge`` does to expired ones.
 
     ``ttl`` of ``None`` (the default) means nothing ever expires. ``tombstone`` keeps
-    the row with its ids, timestamps, revision and metadata and drops the payload;
+    the row with its ids, timestamps and revision and drops the payload;
     ``delete`` removes the row. History messages and checkpoints are always deleted.
     """
 

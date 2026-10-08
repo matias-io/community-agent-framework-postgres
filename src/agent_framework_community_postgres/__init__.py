@@ -14,10 +14,8 @@ from ._client import (
     PostgresClient,
     PostgresSettings,
     PostgresStorageError,
-    RevisionConflict,
     TableNames,
 )
-from ._document_store import Document, DocumentSummary, PostgresDocumentStore
 from ._entra import ENTRA_SCOPE, EntraCredential
 from ._framework import UntestedAgentFrameworkWarning, warn_if_untested_agent_framework
 from ._history_provider import PostgresHistoryProvider
@@ -57,8 +55,6 @@ def __dir__() -> list[str]:
 __all__ = [
     "ENTRA_SCOPE",
     "MIGRATIONS",
-    "Document",
-    "DocumentSummary",
     "EntraCredential",
     "Lease",
     "LeaseLost",
@@ -67,7 +63,6 @@ __all__ = [
     "PostgresAGUIThreadSnapshotStore",
     "PostgresCheckpointStorage",
     "PostgresClient",
-    "PostgresDocumentStore",
     "PostgresHistoryProvider",
     "PostgresLeases",
     "PostgresPersistence",
@@ -77,7 +72,6 @@ __all__ = [
     "PurgeReport",
     "RetentionMode",
     "RetentionPolicy",
-    "RevisionConflict",
     "TableNames",
     "UntestedAgentFrameworkWarning",
     "__version__",

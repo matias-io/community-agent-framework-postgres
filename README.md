@@ -1,7 +1,7 @@
 # community-agent-framework-postgres
-A community-maintained PostgreSQL persistence implementation for Microsoft Agent Framework (MAF), supporting agent chat history, sessions, workflow checkpoints, AG-UI snapshots, and durable JSON documents.
+A community-maintained PostgreSQL persistence implementation for Microsoft Agent Framework (MAF), supporting agent chat history, sessions, workflow checkpoints, and AG-UI snapshots.
 
-The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresDocumentStore` for JSON documents with revisions and leases. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
+The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresLeases` for a lock across replicas. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
 
 ## Status
 
@@ -31,7 +31,7 @@ MAF 1.19 and older are not supported. Their history dedupe drops any new message
 | `PostgresSessionStore` | `SessionStore` | none | MAF marks `SessionStore` experimental |
 | `PostgresCheckpointStorage` | `CheckpointStorage` | none | Decodes only MAF's safe types and its own; `allowed_checkpoint_types` adds more |
 | `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store` |
-| `PostgresDocumentStore`, `PostgresLeases` | none (this package's own) | none | |
+| `PostgresLeases` | none (this package's own) | none | A cross-replica lock; MAF hosting serializes runs per process only |
 | `PostgresPersistence` | none (creates the stores above over one pool) | none | |
 | Microsoft Entra ID sign-in (`credential=`) | none | `azure` | Azure Database for PostgreSQL with Entra authentication |
 
@@ -81,7 +81,6 @@ async def main() -> None:
         await hub.session_store().set("session-1", AgentSession(session_id="session-1"))
         print(await hub.checkpoint_storage(scope="session-1").list_checkpoint_ids(workflow_name="demo"))
         print(await hub.thread_snapshot_store().get(scope="user-1", thread_id="thread-1"))
-        print(await hub.document_store(collection="notes").put(scope="user-1", key="n1", payload={"text": "hi"}))
 
 
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
@@ -287,7 +286,6 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 | `af_sessions` | `application_id, session_id` | `AgentSession.to_dict()` |
 | `af_checkpoints` | `application_id, scope, checkpoint_id` | The encoded `WorkflowCheckpoint` |
 | `af_thread_snapshots` | `application_id, scope, thread_id` | The latest AG-UI thread snapshot |
-| `af_documents` | `application_id, collection, scope, key` | Payload, metadata and revision |
 | `af_leases` | `application_id, resource` | Lease owner, token and expiry |
 | `af_migrations` | `version` | Applied migration versions |
 
@@ -319,7 +317,7 @@ Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests
 - [docs/sessions.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/sessions.md) covers `PostgresSessionStore`.
 - [docs/checkpoints.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/checkpoints.md) covers `PostgresCheckpointStorage`.
 - [docs/thread-snapshots.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/thread-snapshots.md) covers `PostgresAGUIThreadSnapshotStore`.
-- [docs/documents-and-leases.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/documents-and-leases.md) covers `PostgresDocumentStore` and `PostgresLeases`.
+- [docs/leases.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/leases.md) covers `PostgresLeases`.
 - [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md) covers `RetentionPolicy` and purging.
 - [docs/migrations.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/migrations.md) covers `migrate()`, the CLI and SQL for a DBA.
 - [docs/azure-entra.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/azure-entra.md) covers Microsoft Entra ID sign-in on Azure Database for PostgreSQL.

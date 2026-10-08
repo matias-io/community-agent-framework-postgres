@@ -6,7 +6,7 @@ from agent_framework_community_postgres._cli import main
 def test_migrate_print_renders_sql_without_a_database(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["migrate", "--print", "--schema", "agents"]) == 0
     out = capsys.readouterr().out
-    assert '"agents"."af_documents"' in out
+    assert '"agents"."af_sessions"' in out
     assert "-- version 1" in out
 
 

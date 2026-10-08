@@ -9,7 +9,6 @@ from psycopg import sql
 
 from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
-from ._document_store import PostgresDocumentStore
 from ._entra import EntraCredential
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
@@ -123,10 +122,6 @@ class PostgresPersistence:
 
         return PostgresAGUIThreadSnapshotStore(**self._common(kwargs))
 
-    def document_store(self, *, collection: str, **kwargs: Any) -> PostgresDocumentStore:
-        """A document store for one collection on the shared pool."""
-        return PostgresDocumentStore(collection=collection, **self._common(kwargs))
-
     def leases(self) -> PostgresLeases:
         """The lease table on the shared pool."""
         return PostgresLeases(
@@ -155,7 +150,6 @@ class PostgresPersistence:
                 sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
                 True,
             ),
-            ("documents", sql.SQL("payload = NULL"), True),
         ]
         counts: dict[str, int] = {}
         # One transaction per table: row locks are never held across tables, so a long purge cannot

@@ -16,6 +16,7 @@ The first release on PyPI.
 
 ### Changed
 
+- The document store is gone before the first release: `PostgresDocumentStore`, `Document`, `DocumentSummary`, `RevisionConflict` and `PostgresPersistence.document_store()` are removed, and schema version 1 creates no `af_documents` table. No MAF abstraction maps to them. `PostgresLeases` stays, as a cross-replica lock.
 - Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and `agent-framework-ag-ui` 1.5.0.
 
 ### Fixed

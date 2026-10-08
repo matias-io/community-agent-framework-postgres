@@ -83,24 +83,6 @@ def _v1(names: TableNames) -> list[sql.Composed]:
             " PRIMARY KEY (application_id, scope, thread_id))"
         ).format(snapshots=t("thread_snapshots")),
         sql.SQL(
-            "CREATE TABLE {documents} ("
-            " application_id text NOT NULL,"
-            " collection text NOT NULL,"
-            " scope text NOT NULL,"
-            " key text NOT NULL,"
-            " payload jsonb,"
-            " metadata jsonb NOT NULL DEFAULT '{{}}'::jsonb,"
-            " revision bigint NOT NULL DEFAULT 1,"
-            " created_at timestamptz NOT NULL DEFAULT now(),"
-            " updated_at timestamptz NOT NULL DEFAULT now(),"
-            " expires_at timestamptz,"
-            " purged_at timestamptz,"
-            " PRIMARY KEY (application_id, collection, scope, key))"
-        ).format(documents=t("documents")),
-        sql.SQL("CREATE INDEX {idx} ON {documents} (application_id, collection, scope, updated_at DESC)").format(
-            idx=i("documents_scope_idx"), documents=t("documents")
-        ),
-        sql.SQL(
             "CREATE TABLE {leases} ("
             " application_id text NOT NULL,"
             " resource text NOT NULL,"

@@ -14,12 +14,11 @@ def test_render_lists_every_table_with_quoted_names() -> None:
         "sessions",
         "checkpoints",
         "thread_snapshots",
-        "documents",
         "leases",
     ):
         assert f'"agents"."af_{table}"' in text
     assert "-- version 1" in text
-    assert text.count("CREATE TABLE") == 7
+    assert text.count("CREATE TABLE") == 6
 
 
 def test_render_can_select_versions() -> None:

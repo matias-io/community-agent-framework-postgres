@@ -39,16 +39,16 @@ def test_purge_reports_counts(test_dsn: str, schema: str, capsys: pytest.Capture
     with Connection.connect(test_dsn, autocommit=True) as connection:
         connection.execute(
             sql.SQL(
-                "INSERT INTO {} (application_id, collection, scope, key, payload, expires_at)"
-                " VALUES ('tests', 'c', 's', 'k', '{{}}', now() - interval '1 second')"
-            ).format(sql.Identifier(schema, "af_documents"))
+                "INSERT INTO {} (application_id, session_id, snapshot, snapshot_version, expires_at)"
+                " VALUES ('tests', 's', '{{}}', '1', now() - interval '1 second')"
+            ).format(sql.Identifier(schema, "af_sessions"))
         )
     capsys.readouterr()
     assert main(["purge", "--application-id", "tests", *common]) == 0
     out = capsys.readouterr().out
-    assert "af_documents: 1" in out and "total: 1" in out
+    assert "af_sessions: 1" in out and "total: 1" in out
     assert main(["purge", "--application-id", "tests", "--mode", "delete", *common]) == 0
-    assert "af_documents: 1" in capsys.readouterr().out
+    assert "af_sessions: 1" in capsys.readouterr().out
 
 
 @pytest.mark.timeout(30)

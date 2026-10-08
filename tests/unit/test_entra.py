@@ -17,7 +17,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent_framework_community_postgres import (
     PostgresAGUIThreadSnapshotStore,
     PostgresCheckpointStorage,
-    PostgresDocumentStore,
     PostgresHistoryProvider,
     PostgresLeases,
     PostgresPersistence,
@@ -336,7 +335,6 @@ async def test_the_owned_pool_uses_the_entra_connection_class() -> None:
         (PostgresSessionStore, {}),
         (PostgresCheckpointStorage, {}),
         (PostgresAGUIThreadSnapshotStore, {}),
-        (PostgresDocumentStore, {"collection": "c"}),
         (PostgresLeases, {}),
     ],
 )

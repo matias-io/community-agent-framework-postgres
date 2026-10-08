@@ -33,7 +33,6 @@ async def test_migrate_is_idempotent_and_records_versions(client: ClientHandle, 
             "sessions",
             "checkpoints",
             "thread_snapshots",
-            "documents",
             "leases",
         )
     )
@@ -43,21 +42,8 @@ async def test_prefix_and_schema_are_honoured(client: ClientHandle, schema: str)
     names = TableNames(schema=schema, prefix="x_")
     await migrate(client, names)
     async with client.connection() as connection:
-        cursor = await connection.execute(sql.SQL("SELECT count(*) FROM {t}").format(t=names.table("documents")))
+        cursor = await connection.execute(sql.SQL("SELECT count(*) FROM {t}").format(t=names.table("sessions")))
         assert (await cursor.fetchone()) == (0,)
-
-
-async def test_documents_metadata_defaults_to_an_empty_object(client: ClientHandle, names: TableNames) -> None:
-    await migrate(client, names)
-    async with client.connection() as connection:
-        cursor = await connection.execute(
-            "SELECT column_default FROM information_schema.columns"
-            " WHERE table_schema = %s AND table_name = %s AND column_name = 'metadata'",
-            (names.schema, "af_documents"),
-        )
-        row = await cursor.fetchone()
-    assert row is not None
-    assert str(row[0]) == "'{}'::jsonb"
 
 
 async def test_concurrent_first_runs_apply_once_and_never_raise(test_dsn: str, schema: str) -> None:

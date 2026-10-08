@@ -19,7 +19,7 @@ A `ttl` of zero or less, or another `mode`, raises `ValueError`. Pass the policy
 
 Each write sets `expires_at` to the database's `now()` plus `ttl`. What that means depends on the table.
 
-- `af_sessions`, `af_thread_snapshots` and `af_documents` keep one row per key and rewrite it. Expiry counts from the last write to that key.
+- `af_sessions` and `af_thread_snapshots` keep one row per key and rewrite it. Expiry counts from the last write to that key.
 - `af_history_messages` adds one row per message. Each message expires a TTL after it was inserted, and later messages do not extend it. An active session loses its oldest messages once they are older than the TTL.
 - `af_checkpoints` adds one row per checkpoint. Each checkpoint expires a TTL after its save, so a long-running workflow loses its oldest checkpoints first. Saving the same `checkpoint_id` again resets that row.
 
@@ -35,17 +35,16 @@ A purge acts on rows whose `expires_at` has passed.
 | `af_sessions` | `snapshot` set to `NULL` | Deleted |
 | `af_checkpoints` | Deleted | Deleted |
 | `af_thread_snapshots` | `messages`, `state`, `interrupt`, `session_state` set to `NULL` | Deleted |
-| `af_documents` | `payload` set to `NULL` | Deleted |
 | `af_leases` | Not purged | Not purged |
 
-A tombstone keeps the ids, timestamps, revision and metadata and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again.
+A tombstone keeps the ids, timestamps and revision and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again.
 
 `purge()` returns a `PurgeReport`. `report.counts` maps each table name to the rows it changed, and `report.total` is the sum. `counts` is a read-only mapping, not a `dict`; `dict(report.counts)` gives a copy you can change. A report pickles, copies and works with `dataclasses.asdict`.
 
 ## Scope of a purge
 
-- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, all checkpoint scopes and all document collections. Each table is purged in its own transaction, so a failure part way keeps the tables already purged.
-- A store's `purge()` covers that store's rows only. The history provider covers its application, tenant, agent and source. A checkpoint storage covers its scope. A document store covers its collection.
+- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, and all checkpoint scopes. Each table is purged in its own transaction, so a failure part way keeps the tables already purged.
+- A store's `purge()` covers that store's rows only. The history provider covers its application, tenant, agent and source. A checkpoint storage covers its scope.
 - A purge acts on every expired row in its scope, whichever policy stamped it. A hub or store built without a policy still purges rows another store wrote with one.
 - `hub.purge(mode=None)` uses `mode` when you pass it, otherwise the hub policy's mode, which defaults to `"tombstone"`. A store's `purge()` uses its own policy's mode.
 
@@ -56,6 +55,8 @@ import asyncio
 import sys
 from datetime import timedelta
 
+from agent_framework import AgentSession
+
 from agent_framework_community_postgres import PostgresPersistence, RetentionPolicy
 
 DSN = "postgresql://postgres:postgres@127.0.0.1:5433/agent_framework"
@@ -65,13 +66,12 @@ async def main() -> None:
     policy = RetentionPolicy(ttl=timedelta(seconds=1))
     async with PostgresPersistence(application_id="docs", connection_string=DSN, retention=policy) as hub:
         await hub.migrate()
-        notes = hub.document_store(collection="notes")
-        await notes.put(scope="user-1", key="n1", payload={"text": "hi"}, metadata={"title": "first"})
+        sessions = hub.session_store()
+        await sessions.set("session-1", AgentSession(session_id="session-1"))
         await asyncio.sleep(1.5)
         report = await hub.purge()
-        print(report.counts["af_documents"], await notes.get(scope="user-1", key="n1"))
-        print([s.metadata for s in await notes.list(scope="user-1", include_purged=True)])
-        await notes.delete(scope="user-1", key="n1")
+        print(report.counts["af_sessions"], await sessions.get("session-1"))
+        await sessions.delete("session-1")
 
 
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:

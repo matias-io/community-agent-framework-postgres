@@ -15,9 +15,9 @@ from agent_framework_community_postgres._client import (
 
 def test_table_names_render_schema_qualified_identifiers() -> None:
     names = TableNames(schema="agents", prefix="af_")
-    assert names.table("documents").as_string() == '"agents"."af_documents"'
-    assert names.index("documents_scope_idx").as_string() == '"af_documents_scope_idx"'
-    assert names.qualified("documents") == "agents.af_documents"
+    assert names.table("sessions").as_string() == '"agents"."af_sessions"'
+    assert names.index("history_messages_session_idx").as_string() == '"af_history_messages_session_idx"'
+    assert names.qualified("sessions") == "agents.af_sessions"
 
 
 @pytest.mark.parametrize("schema", ["Public", "my schema", 'x"y', "", "1abc", "public\n", "pg_custom"])
