@@ -1,9 +1,12 @@
 import asyncio
+import time
+from datetime import timedelta
 
 import pytest
 from agent_framework import SecretString
-from psycopg import sql
+from psycopg import AsyncConnection, sql
 
+from agent_framework_community_postgres import _migrations
 from agent_framework_community_postgres._client import ClientHandle, PostgresStorageError, TableNames
 from agent_framework_community_postgres._migrations import current_version, migrate, pending_versions
 
@@ -72,3 +75,30 @@ async def test_a_database_newer_than_the_package_is_refused(client: ClientHandle
     with pytest.raises(PostgresStorageError) as info:
         await migrate(client, migrated)
     assert str(info.value) == _NEWER
+
+
+@pytest.mark.timeout(30)
+async def test_migration_ddl_runs_under_a_lock_timeout(
+    client: ClientHandle, names: TableNames, test_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A later version's DDL that waits on a lock held by application traffic must fail with 55P03 within
+    # lock_timeout instead of queueing forever (and blocking every query that queues behind it).
+    await migrate(client, names)
+
+    def fake_v2(names: TableNames) -> list[sql.Composed]:
+        return [sql.SQL("ALTER TABLE {s} ADD COLUMN lock_probe int").format(s=names.table("sessions"))]
+
+    monkeypatch.setattr(_migrations, "MIGRATIONS", (_migrations._v1, fake_v2))  # pyright: ignore[reportPrivateUsage]
+    blocker = await AsyncConnection.connect(test_dsn)
+    try:
+        await blocker.execute(sql.SQL("LOCK TABLE {s} IN ACCESS EXCLUSIVE MODE").format(s=names.table("sessions")))
+        started = time.monotonic()
+        with pytest.raises(PostgresStorageError) as info:
+            await migrate(client, names, lock_timeout=timedelta(seconds=1))
+        assert time.monotonic() - started < 10
+        assert info.value.sqlstate == "55P03"
+        assert info.value.retryable is True
+    finally:
+        await blocker.rollback()
+        await blocker.close()
+    assert await current_version(client, names) == 1

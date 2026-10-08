@@ -90,7 +90,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
                     " %(session_state)s, {expires})"
                     " ON CONFLICT (application_id, scope, thread_id) DO UPDATE SET"
                     " messages = EXCLUDED.messages, state = EXCLUDED.state, interrupt = EXCLUDED.interrupt,"
-                    " session_state = EXCLUDED.session_state, revision = {snapshots}.revision + 1,"
+                    " session_state = EXCLUDED.session_state,"
                     " updated_at = now(), expires_at = EXCLUDED.expires_at, purged_at = NULL"
                 ).format(snapshots=self._names.table("thread_snapshots"), expires=EXPIRES_AT),
                 self._params(scope, thread_id) | values | {"ttl": self._ttl()},

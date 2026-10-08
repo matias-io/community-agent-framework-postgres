@@ -37,7 +37,7 @@ A purge acts on rows whose `expires_at` has passed.
 | `af_thread_snapshots` | `messages`, `state`, `interrupt`, `session_state` set to `NULL` | Deleted |
 | `af_leases` | Deleted | Deleted |
 
-A tombstone keeps the ids, timestamps and revision and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again. Delete mode also removes rows an earlier purge tombstoned.
+A tombstone keeps the ids and timestamps and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again. Delete mode also removes rows an earlier purge tombstoned.
 
 A purge works in batches of 1000 rows, one transaction per batch, and keeps going until a batch comes back short. Each batch locks its rows with `FOR UPDATE SKIP LOCKED`, so two purges running at once take different rows and never wait on each other. A failure part way keeps the batches already committed.
 

@@ -22,8 +22,14 @@ def schema(test_dsn: str) -> Iterator[str]:
             connection.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(name)))
 
 
+@pytest.fixture(autouse=True)
+def connection_string(test_dsn: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI reads the connection string only from ``POSTGRES_CONNECTION_STRING``."""
+    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", test_dsn)
+
+
 def test_status_migrate_status(test_dsn: str, schema: str, capsys: pytest.CaptureFixture[str]) -> None:
-    common = ["--connection-string", test_dsn, "--schema", schema]
+    common = ["--schema", schema]
     assert main(["status", *common]) == 0
     assert "current version: 0" in capsys.readouterr().out
     assert main(["migrate", *common]) == 0
@@ -34,7 +40,7 @@ def test_status_migrate_status(test_dsn: str, schema: str, capsys: pytest.Captur
 
 
 def test_purge_reports_counts(test_dsn: str, schema: str, capsys: pytest.CaptureFixture[str]) -> None:
-    common = ["--connection-string", test_dsn, "--schema", schema]
+    common = ["--schema", schema]
     assert main(["migrate", *common]) == 0
     with Connection.connect(test_dsn, autocommit=True) as connection:
         connection.execute(
@@ -52,9 +58,12 @@ def test_purge_reports_counts(test_dsn: str, schema: str, capsys: pytest.Capture
 
 
 @pytest.mark.timeout(30)
-def test_wrong_password_is_a_one_line_error(capsys: pytest.CaptureFixture[str], test_dsn: str) -> None:
+def test_wrong_password_is_a_one_line_error(
+    capsys: pytest.CaptureFixture[str], test_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", "postgresql://postgres:SECRETPW@127.0.0.1:5433/agent_framework")
     started = time.monotonic()
-    code = main(["status", "--connection-string", "postgresql://postgres:SECRETPW@127.0.0.1:5433/agent_framework"])
+    code = main(["status"])
     captured = capsys.readouterr()
     assert code == 1
     assert time.monotonic() - started < 20
@@ -63,7 +72,7 @@ def test_wrong_password_is_a_one_line_error(capsys: pytest.CaptureFixture[str], 
 
 
 def test_status_reports_a_newer_database(test_dsn: str, schema: str, capsys: pytest.CaptureFixture[str]) -> None:
-    common = ["--connection-string", test_dsn, "--schema", schema]
+    common = ["--schema", schema]
     assert main(["migrate", *common]) == 0
     with Connection.connect(test_dsn, autocommit=True) as connection:
         connection.execute(

@@ -14,8 +14,10 @@ pytestmark = pytest.mark.integration
 
 async def test_stores_share_the_pool_and_migrations_run_once(test_dsn: str, schema: str) -> None:
     async with PostgresPersistence(application_id="tests", connection_string=test_dsn, schema=schema) as persistence:
+        assert await persistence.current_version() == 0
         report = await persistence.migrate()
         assert report.applied == (1,)
+        assert await persistence.current_version() == 1
         assert await persistence.pending_migrations() == []
         history = persistence.history_provider()
         sessions = persistence.session_store()

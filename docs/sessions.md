@@ -10,7 +10,6 @@
 | `session_id` | `text` | The id passed to `set`, `get` and `delete`. Part of the primary key |
 | `snapshot` | `jsonb` | `AgentSession.to_dict()`. `NULL` after a tombstone purge |
 | `snapshot_version` | `text` | This package's row format, currently `"1"` |
-| `revision` | `bigint` | Starts at 1 and grows by one on every `set` |
 | `created_at`, `updated_at` | `timestamptz` | First and latest write |
 | `expires_at` | `timestamptz` | Set when retention is on |
 | `purged_at` | `timestamptz` | Set by a tombstone purge |

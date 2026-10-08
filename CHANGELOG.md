@@ -16,6 +16,7 @@ The first release on PyPI.
 - `pool_kwargs` on every store and the hub.
 - `PostgresLeases.purge()`, which deletes the expired leases of its application and returns a `PurgeReport`.
 - `compatibility()` and `Compatibility`: the installed `agent-framework-core` and `agent-framework-ag-ui` next to the tested minors. The first store or hub built in a process logs one warning when a newer minor is installed. Importing the package has no side effects.
+- `migrate(lock_timeout=)`, `PostgresPersistence.current_version()`, `migrate --print --from-version N`.
 
 ### Changed
 
@@ -24,6 +25,11 @@ The first release on PyPI.
 - Owned pools set TCP keepalives and `tcp_user_timeout` unless the connection string does.
 - With `credential=`, `sslmode` defaults to `verify-full` with the system trust store, and `disable`, `allow` and `prefer` are refused.
 - Purge runs in batches of 1000 rows, one transaction per batch, and the hub purge also removes expired leases.
+- Schema version 1 is the first released schema: checkpoints carry `tenant_id`, `payload_format` and a write `sequence`; every purged table has an expiry index; there is no document table. A database created by the unpublished 0.1.0 snapshot must be recreated.
+
+### Removed
+
+- The CLI's `--connection-string`; set `POSTGRES_CONNECTION_STRING`, which never shows in `ps`.
 
 ### Fixed
 

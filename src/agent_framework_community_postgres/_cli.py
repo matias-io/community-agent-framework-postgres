@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from agent_framework.exceptions import SettingNotFoundError
 
 from ._client import PostgresStorageError, TableNames
-from ._migrations import MIGRATIONS, current_version, ensure_supported, render
+from ._migrations import MIGRATIONS, ensure_supported, render
 from ._persistence import PostgresPersistence
 
 
@@ -20,9 +20,6 @@ def _add_common(parser: argparse.ArgumentParser, *, suppress: bool = False) -> N
     def d(value: str | None) -> str | None:
         return argparse.SUPPRESS if suppress else value
 
-    parser.add_argument(
-        "--connection-string", default=d(None), help="psycopg conninfo or URI; defaults to POSTGRES_CONNECTION_STRING"
-    )
     parser.add_argument("--schema", default=d("public"))
     parser.add_argument("--table-prefix", default=d("af_"))
     parser.add_argument(
@@ -41,6 +38,9 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     migrate = commands.add_parser("migrate", parents=[shared], help="apply pending migrations")
     migrate.add_argument("--print", action="store_true", dest="print_sql", help="print the SQL instead of running it")
+    migrate.add_argument(
+        "--from-version", type=int, default=None, help="with --print, print only the versions after this one"
+    )
     commands.add_parser("status", parents=[shared], help="show the applied and pending versions")
     purge = commands.add_parser(
         "purge", parents=[shared], help="tombstone or delete the rows whose expires_at has passed"
@@ -52,7 +52,6 @@ def _parser() -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> int:
     async with PostgresPersistence(
         application_id=args.application_id or "cli",
-        connection_string=args.connection_string,
         schema=args.schema,
         table_prefix=args.table_prefix,
     ) as persistence:
@@ -60,7 +59,7 @@ async def _run(args: argparse.Namespace) -> int:
             report = await persistence.migrate()
             print(f"applied: {', '.join(map(str, report.applied)) or 'none'}; current version: {report.current}")
         elif args.command == "status":
-            current = await current_version(persistence._client, persistence.names)  # pyright: ignore[reportPrivateUsage]
+            current = await persistence.current_version()
             pending = range(current + 1, len(MIGRATIONS) + 1)
             print(f"current version: {current}; pending: {', '.join(map(str, pending)) or 'none'}")
             ensure_supported(current)
@@ -77,11 +76,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "purge" and args.application_id is None:
         _parser().error("purge needs --application-id")
+    if args.command == "migrate" and args.from_version is not None and not args.print_sql:
+        _parser().error("--from-version needs --print")
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
     try:
         names = TableNames(schema=args.schema, prefix=args.table_prefix)
         if args.command == "migrate" and args.print_sql:
-            print(render(names), end="")
+            print(render(names, range((args.from_version or 0) + 1, len(MIGRATIONS) + 1)), end="")
             return 0
         with asyncio.Runner(loop_factory=loop_factory) as runner:
             return runner.run(_run(args))
@@ -92,5 +93,5 @@ def main(argv: Sequence[str] | None = None) -> int:
     except PostgresStorageError as exc:
         print(f"error: {exc}", file=sys.stderr)
     except SettingNotFoundError:
-        print("error: set POSTGRES_CONNECTION_STRING or pass --connection-string", file=sys.stderr)
+        print("error: set POSTGRES_CONNECTION_STRING", file=sys.stderr)
     return 1

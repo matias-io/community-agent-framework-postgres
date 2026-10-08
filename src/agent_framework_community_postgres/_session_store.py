@@ -86,7 +86,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
                     " VALUES (%(app)s, %(id)s, %(snapshot)s, %(version)s, {expires})"
                     " ON CONFLICT (application_id, session_id) DO UPDATE SET"
                     " snapshot = EXCLUDED.snapshot, snapshot_version = EXCLUDED.snapshot_version,"
-                    " revision = {sessions}.revision + 1, updated_at = now(),"
+                    " updated_at = now(),"
                     " expires_at = EXCLUDED.expires_at, purged_at = NULL"
                 ).format(sessions=self._names.table("sessions"), expires=EXPIRES_AT),
                 {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Self
 
 from agent_framework import SecretString
@@ -14,7 +15,7 @@ from ._entra import EntraCredential
 from ._framework import log_untested_once
 from ._history_provider import PostgresHistoryProvider
 from ._leases import PostgresLeases
-from ._migrations import MigrationReport, migrate, pending_versions
+from ._migrations import MigrationReport, current_version, migrate, pending_versions
 from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
 from ._session_store import PostgresSessionStore
 
@@ -82,13 +83,17 @@ class PostgresPersistence:
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         await self.close()
 
-    async def migrate(self) -> MigrationReport:
-        """Create or upgrade the schema."""
-        return await migrate(self._client, self.names)
+    async def migrate(self, *, lock_timeout: timedelta = timedelta(seconds=30)) -> MigrationReport:
+        """Create or upgrade the schema; each version's DDL gives up after ``lock_timeout`` waiting on a lock."""
+        return await migrate(self._client, self.names, lock_timeout=lock_timeout)
 
     async def pending_migrations(self) -> list[int]:
         """Versions ``migrate`` would apply."""
         return await pending_versions(self._client, self.names)
+
+    async def current_version(self) -> int:
+        """The schema version the database is at; 0 before the first migration."""
+        return await current_version(self._client, self.names)
 
     def _common(self, overrides: dict[str, Any]) -> dict[str, Any]:
         for key in _HUB_OWNED:

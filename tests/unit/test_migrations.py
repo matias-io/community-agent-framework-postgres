@@ -1,9 +1,11 @@
 import re
+from datetime import timedelta
+from typing import cast
 
 import pytest
 
-from agent_framework_community_postgres._client import TableNames
-from agent_framework_community_postgres._migrations import MIGRATIONS, render
+from agent_framework_community_postgres._client import ClientHandle, TableNames
+from agent_framework_community_postgres._migrations import MIGRATIONS, migrate, render
 
 
 def test_render_lists_every_table_with_quoted_names() -> None:
@@ -22,7 +24,7 @@ def test_render_lists_every_table_with_quoted_names() -> None:
 
 
 def test_render_can_select_versions() -> None:
-    assert render(TableNames(), versions=[]).strip() == ""
+    assert render(TableNames(), versions=[]) == ""
     assert len(MIGRATIONS) == 1
 
 
@@ -47,3 +49,43 @@ def test_render_wraps_each_version_in_one_transaction() -> None:
 def test_render_rejects_unknown_versions(versions: list[int]) -> None:
     with pytest.raises(ValueError, match="between 1 and 1"):
         render(TableNames(), versions=versions)
+
+
+def test_there_is_one_schema_version() -> None:
+    assert len(MIGRATIONS) == 1
+
+
+def test_render_from_version_prints_only_later_versions() -> None:
+    assert render(TableNames(), versions=range(2, len(MIGRATIONS) + 1)) == ""
+    assert "-- version 1" in render(TableNames(), versions=range(1, len(MIGRATIONS) + 1))
+
+
+def test_rendered_sql_sets_a_lock_timeout_per_version() -> None:
+    text = render(TableNames())
+    assert text.count("SET LOCAL lock_timeout = '30000ms';") == len(MIGRATIONS)
+    assert text.index("BEGIN;") < text.index("SET LOCAL lock_timeout") < text.index('CREATE TABLE "public"."af_history')
+
+
+@pytest.mark.parametrize("lock_timeout", [timedelta(0), timedelta(microseconds=999), timedelta(seconds=-1)])
+async def test_migrate_refuses_a_lock_timeout_postgres_would_read_as_none(lock_timeout: timedelta) -> None:
+    handle = cast(ClientHandle, object())  # never reached: the check runs before any connection
+    with pytest.raises(ValueError, match="at least one millisecond"):
+        await migrate(handle, TableNames(), lock_timeout=lock_timeout)
+
+
+def test_longest_identifier_matches_the_migrations() -> None:
+    from agent_framework_community_postgres._client import _LONGEST_IDENTIFIER
+
+    text = render(TableNames(schema="public", prefix=""))
+    names = {a or b for a, b in re.findall(r'"public"\."([a-z_]+)"|CREATE INDEX "([a-z_]+)"', text)}
+    # history_messages_session_idx and thread_snapshots_expires_idx are both 28 bytes, so compare lengths.
+    assert len(max(names, key=len)) == len(_LONGEST_IDENTIFIER)
+
+
+def test_v1_creates_the_final_checkpoint_shape() -> None:
+    text = render(TableNames())
+    assert "tenant_id text NOT NULL DEFAULT ''" in text
+    assert "payload_format text NOT NULL DEFAULT 'agent-framework.python.checkpoint.v1'" in text
+    assert "sequence bigint GENERATED ALWAYS AS IDENTITY" in text
+    assert "iteration_count" not in text and "revision" not in text and "documents" not in text
+    assert text.count("expires_idx") == 5  # history, sessions, checkpoints, thread_snapshots, leases
