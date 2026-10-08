@@ -57,6 +57,7 @@ async def test_closed_borrowed_pool_raises_storage_error(test_dsn: str) -> None:
         async with ClientHandle(None, pool).connection():
             pass
     assert isinstance(info.value.__cause__, PoolClosed)
+    assert info.value.retryable is False
 
 
 async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None:
@@ -143,6 +144,7 @@ async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) 
                 async with ClientHandle(None, pool).connection():
                     pass
         assert str(info.value) == _CLEAR.replace("10 seconds", "2 seconds")
+        assert info.value.retryable is True
     finally:
         await pool.close()
 
@@ -161,3 +163,22 @@ async def test_a_non_transactional_read_runs_in_autocommit(persistence: Postgres
         assert connection.info.transaction_status == TransactionStatus.IDLE
         cursor = await connection.execute("SELECT txid_current_if_assigned()")
         assert await cursor.fetchone() == (None,)
+
+
+async def test_a_read_on_a_borrowed_non_autocommit_connection_leaves_no_transaction_open(
+    test_dsn: str, schema: str
+) -> None:
+    async with await AsyncConnection.connect(test_dsn) as connection:
+        assert connection.autocommit is False
+        hub = PostgresPersistence(application_id="tests", client=connection, schema=schema)
+        await hub.migrate()
+        store = hub.session_store()
+        assert await store.get("s") is None
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        await store.set("s", AgentSession())
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        async with await AsyncConnection.connect(test_dsn, autocommit=True) as other:
+            cursor = await other.execute(
+                sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_sessions"))
+            )
+            assert await cursor.fetchone() == (1,)
