@@ -6,9 +6,10 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from typing import Any
 
 from agent_framework import SecretString
 from psycopg import sql
@@ -67,6 +68,7 @@ class PostgresLeases(BaseStore):
         env_file_encoding: str | None = None,
         schema: str = "public",
         table_prefix: str = "af_",
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             application_id=application_id,
@@ -78,6 +80,7 @@ class PostgresLeases(BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=RetentionPolicy(),
+            pool_kwargs=pool_kwargs,
         )
 
     async def try_acquire(self, resource: str, *, owner: str, ttl: timedelta) -> Lease | None:

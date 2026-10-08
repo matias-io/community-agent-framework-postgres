@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any, Self
 
@@ -31,6 +32,7 @@ class BaseStore:
         schema: str,
         table_prefix: str,
         retention: RetentionPolicy | None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         self.application_id = require_text(application_id, "application_id")
         self._names = TableNames(schema=schema, prefix=table_prefix)
@@ -40,6 +42,7 @@ class BaseStore:
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             credential=credential,
+            pool_kwargs=pool_kwargs,
         )
         self._retention = retention or RetentionPolicy()
 

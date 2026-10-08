@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
 from agent_framework import AgentSession, SecretString, SessionStore
@@ -39,6 +40,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         SessionStore.__init__(self)
         BaseStore.__init__(
@@ -52,12 +54,16 @@ class PostgresSessionStore(SessionStore, BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
 
     async def get(self, session_id: str) -> AgentSession | None:
         """A fresh copy of the stored session, or ``None`` when absent or purged."""
         SessionStore.validate_session_id(session_id)
-        async with self._client.connection() as connection, connection.cursor(row_factory=dict_row) as cursor:
+        async with (
+            self._client.connection(transactional=False) as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 sql.SQL(
                     "SELECT snapshot, purged_at FROM {sessions} WHERE application_id = %(app)s AND session_id = %(id)s"

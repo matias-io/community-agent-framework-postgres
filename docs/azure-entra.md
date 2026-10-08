@@ -65,9 +65,11 @@ For each new connection the pool opens, the package:
 1. Calls `credential.get_token("https://ossrdbms-aad.database.windows.net/.default")`, and awaits the result when the credential is async.
 2. Passes `token.token` as the password.
 3. When neither the connection string nor `PGUSER` sets a user, takes it from the token's `upn`, `preferred_username` or `unique_name` claim, in that order. The token is decoded without verification only to read that name; the server verifies the token. If none of the claims is present, it raises `PostgresStorageError` asking you to set `user=` in the connection string.
-4. Adds `sslmode=require` when neither the connection string nor `PGSSLMODE` sets an `sslmode`. Azure requires TLS.
+4. Adds `sslmode=verify-full` when neither the connection string nor `PGSSLMODE` sets an `sslmode`, and with it `sslrootcert=system` when neither the connection string nor `PGSSLROOTCERT` sets a root certificate.
 
-`sslmode=require` encrypts the connection but does not check the server's certificate. To check it, set `sslmode=verify-full` and `sslrootcert=` to a file holding the root certificate authorities Microsoft lists for Azure Database for PostgreSQL, in the connection string or through `PGSSLMODE` and `PGSSLROOTCERT`.
+The token is a bearer credential for every Azure Database for PostgreSQL server this identity can sign in to, so the connection checks the server's certificate and host name before sending it. `sslrootcert=system` checks the certificate against the operating system's trust store, which needs libpq 16 or later; psycopg's binary wheel bundles libpq 18. To use a file instead, for example the root certificate authorities Microsoft lists for Azure Database for PostgreSQL, set `sslrootcert=` in the connection string or `PGSSLROOTCERT`. `sslmode=require` is accepted when you set it, and encrypts without checking the certificate.
+
+With a credential, a store or hub raises `ValueError` when it is created if the `sslmode` libpq would use is `disable`, `allow` or `prefer`, which can send the token unencrypted. libpq takes `sslmode` from the `kwargs` in `pool_kwargs` first, then the connection string, then `PGSSLMODE`. The message names the setting, for example `sslmode=prefer` or `PGSSLMODE=prefer`.
 
 A credential is any object with a `get_token(*scopes)` method that returns an object with `token` and `expires_on`, sync or async. Every `azure.identity` and `azure.identity.aio` credential fits, and so does your own. The package calls a synchronous `get_token` in a worker thread, so it does not block the event loop, but the `azure.identity.aio` credentials are the better fit for an async application. Close an `aio` credential when you are done with it, for example with `async with` as above.
 

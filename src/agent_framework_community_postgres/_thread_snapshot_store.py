@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from agent_framework import SecretString
@@ -44,6 +45,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             application_id=application_id,
@@ -55,6 +57,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
 
     def _params(self, scope: str, thread_id: str) -> dict[str, Any]:
@@ -95,7 +98,10 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
 
     async def get(self, *, scope: str, thread_id: str) -> AGUIThreadSnapshot | None:
         """The latest snapshot, or ``None`` when absent or purged."""
-        async with self._client.connection() as connection, connection.cursor(row_factory=dict_row) as cursor:
+        async with (
+            self._client.connection(transactional=False) as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 sql.SQL(
                     "SELECT messages, state, interrupt, session_state, purged_at FROM {snapshots} WHERE {key}"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,6 +46,7 @@ class PostgresCheckpointStorage(BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             application_id=application_id,
@@ -57,6 +58,7 @@ class PostgresCheckpointStorage(BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
         self.scope = optional_text(scope, "scope")
         self._allowed_types: frozenset[str] = frozenset(allowed_checkpoint_types or [])
@@ -117,7 +119,7 @@ class PostgresCheckpointStorage(BaseStore):
 
     async def load(self, checkpoint_id: str) -> WorkflowCheckpoint:
         """The checkpoint with this id in this store's scope; ``WorkflowCheckpointException`` when absent."""
-        async with self._client.connection() as connection:
+        async with self._client.connection(transactional=False) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "SELECT encoded FROM {checkpoints}"

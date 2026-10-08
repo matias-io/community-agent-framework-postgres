@@ -2,7 +2,6 @@ import time
 from typing import Any
 
 import pytest
-from agent_framework import Message
 from psycopg import OperationalError
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
@@ -40,17 +39,22 @@ def _split(test_dsn: str) -> tuple[str, str]:
     return make_conninfo("", **options), password
 
 
-async def test_the_token_reaches_postgres_as_the_password(test_dsn: str, schema: str) -> None:
+async def test_the_token_reaches_postgres_as_the_password(test_dsn: str) -> None:
+    # Through the connection class: a store with a credential refuses the local container's sslmode=disable.
     conninfo, password = _split(test_dsn)
     credential = PasswordAsToken(password)
-    async with PostgresPersistence(
-        application_id="tests", connection_string=conninfo, schema=schema, credential=credential
-    ) as hub:
-        await hub.migrate()
-        history = hub.history_provider()
-        await history.save_messages("s", [Message(role="user", contents=["signed in with a token"])])
-        assert [m.text for m in await history.get_messages("s")] == ["signed in with a token"]
-    assert credential.scopes and set(credential.scopes) == {(ENTRA_SCOPE,)}
+    connection_class = entra_connection_class(credential)
+    async with await connection_class.connect(conninfo, autocommit=True, sslmode="disable") as connection:
+        assert (await (await connection.execute("SELECT 1")).fetchone()) == (1,)
+    assert credential.scopes == [(ENTRA_SCOPE,)]
+
+
+async def test_a_store_with_a_credential_refuses_an_unencrypted_connection(test_dsn: str, schema: str) -> None:
+    conninfo, password = _split(test_dsn)
+    credential = PasswordAsToken(password)
+    with pytest.raises(ValueError, match="sslmode=disable"):
+        PostgresPersistence(application_id="tests", connection_string=conninfo, schema=schema, credential=credential)
+    assert credential.scopes == []
 
 
 class NotSignedIn:
@@ -60,8 +64,12 @@ class NotSignedIn:
 
 async def test_a_failing_credential_reaches_the_caller_through_the_pool(test_dsn: str, schema: str) -> None:
     conninfo, _ = _split(test_dsn)
+    # The eager credential check fails before any connection, so the unencrypted test server is never reached.
     hub = PostgresPersistence(
-        application_id="tests", connection_string=conninfo, schema=schema, credential=NotSignedIn()
+        application_id="tests",
+        connection_string=make_conninfo(conninfo, sslmode="require"),
+        schema=schema,
+        credential=NotSignedIn(),
     )
     try:
         started = time.monotonic()

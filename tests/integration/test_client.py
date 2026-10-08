@@ -5,6 +5,7 @@ import pytest
 from agent_framework import AgentSession, SecretString
 from psycopg import AsyncConnection, sql
 from psycopg.errors import UndefinedTable
+from psycopg.pq import TransactionStatus
 from psycopg_pool import AsyncConnectionPool, PoolClosed
 
 from agent_framework_community_postgres import PostgresPersistence, PostgresSessionStore
@@ -144,3 +145,19 @@ async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) 
         assert str(info.value) == _CLEAR.replace("10 seconds", "2 seconds")
     finally:
         await pool.close()
+
+
+async def test_driver_errors_carry_sqlstate(persistence: PostgresPersistence) -> None:
+    with pytest.raises(PostgresStorageError) as info:
+        async with persistence._client.connection() as connection:
+            await connection.execute("SELECT * FROM no_such_table_here")
+    assert info.value.sqlstate == "42P01"
+    assert info.value.retryable is False
+
+
+async def test_a_non_transactional_read_runs_in_autocommit(persistence: PostgresPersistence) -> None:
+    async with persistence._client.connection(transactional=False) as connection:
+        assert connection.autocommit is True
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        cursor = await connection.execute("SELECT txid_current_if_assigned()")
+        assert await cursor.fetchone() == (None,)

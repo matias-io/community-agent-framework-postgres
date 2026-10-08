@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, cast
 
 from agent_framework import HistoryProvider, Message, SecretString
@@ -56,6 +56,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         HistoryProvider.__init__(
             self,
@@ -77,6 +78,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
         if max_messages is not None and max_messages < 0:
             raise ValueError("max_messages must be None (unlimited) or a non-negative integer.")
@@ -103,7 +105,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
     ) -> list[Message]:
         """All stored messages for the session, oldest first."""
         params = self._params(session_id)
-        async with self._client.connection() as connection:
+        async with self._client.connection(transactional=False) as connection:
             return await self._read(connection, params)
 
     async def _read(self, connection: AsyncConnection[Any], params: dict[str, Any]) -> list[Message]:
@@ -181,7 +183,7 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
 
     async def list_sessions(self) -> list[str]:
         """Session ids with stored history under this provider's scope, sorted."""
-        async with self._client.connection() as connection:
+        async with self._client.connection(transactional=False) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "SELECT DISTINCT session_id FROM {history}"

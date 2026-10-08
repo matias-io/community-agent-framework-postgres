@@ -12,12 +12,16 @@ The first release on PyPI.
 
 - Microsoft Entra ID sign-in for Azure Database for PostgreSQL: `credential=` on every store and on `PostgresPersistence` takes a sync or async `azure-identity` credential, and the owned pool uses a fresh token as the password of each new connection. A failing credential raises `PostgresStorageError` naming its error on the first call. `EntraCredential` and `ENTRA_SCOPE` are exported. See `docs/azure-entra.md`.
 - The `azure` extra, which installs `azure-identity` and `aiohttp`, the async transport the `azure.identity.aio` credentials need.
+- `PostgresStorageError.sqlstate` and `.retryable`.
+- `pool_kwargs` on every store and the hub.
 - `UntestedAgentFrameworkWarning`, emitted once at import when the installed `agent-framework-core` or `agent-framework-ag-ui` is a newer minor than this release was tested on. See `docs/compatibility.md` for how to silence it.
 
 ### Changed
 
 - The document store is gone before the first release: `PostgresDocumentStore`, `Document`, `DocumentSummary`, `RevisionConflict` and `PostgresPersistence.document_store()` are removed, and schema version 1 creates no `af_documents` table. No MAF abstraction maps to them. `PostgresLeases` stays, as a cross-replica lock.
 - Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and `agent-framework-ag-ui` 1.5.0.
+- Owned pools set TCP keepalives and `tcp_user_timeout` unless the connection string does.
+- With `credential=`, `sslmode` defaults to `verify-full` with the system trust store, and `disable`, `allow` and `prefer` are refused.
 
 ### Fixed
 

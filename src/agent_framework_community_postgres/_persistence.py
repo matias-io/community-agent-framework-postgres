@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Self
 
 from agent_framework import SecretString
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 # Another application id, schema or prefix would escape the hub's migrations or purge; another client
 # or credential would escape its pool and its close.
-_HUB_OWNED = ("application_id", "client", "credential", "schema", "table_prefix")
+_HUB_OWNED = ("application_id", "client", "credential", "pool_kwargs", "schema", "table_prefix")
 
 
 class PostgresPersistence:
@@ -45,6 +46,7 @@ class PostgresPersistence:
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         self.application_id = require_text(application_id, "application_id")
         self.names = TableNames(schema=schema, prefix=table_prefix)
@@ -55,6 +57,7 @@ class PostgresPersistence:
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             credential=credential,
+            pool_kwargs=pool_kwargs,
         )
 
     @property

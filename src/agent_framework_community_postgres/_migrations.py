@@ -140,7 +140,7 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
 
 async def current_version(client: ClientHandle, names: TableNames) -> int:
     """The highest applied version, or 0 when nothing has been applied."""
-    async with client.connection() as connection:
+    async with client.connection(transactional=False) as connection:
         cursor = await connection.execute("SELECT to_regclass(%s)", (names.qualified("migrations"),))
         found = await cursor.fetchone()
         if found is None or found[0] is None:
