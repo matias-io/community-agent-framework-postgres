@@ -295,7 +295,7 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 
 ## Retention
 
-Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. Until a purge runs, reads still return expired rows. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
+Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages, checkpoints and expired leases are always deleted. Leases take no policy. Until a purge runs, reads still return expired rows. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
 
 ## Private Agent Framework imports
 

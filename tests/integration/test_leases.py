@@ -155,9 +155,12 @@ async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(
         assert lost.value.resource == resource
 
 
-async def test_purge_deletes_expired_leases(persistence: PostgresPersistence) -> None:
+async def test_purge_deletes_expired_leases(
+    persistence: PostgresPersistence, expire: Callable[[str], Awaitable[None]]
+) -> None:
     leases = persistence.leases()
-    assert await leases.try_acquire("r", owner="o", ttl=timedelta(milliseconds=50)) is not None
-    await asyncio.sleep(0.1)
+    assert await leases.try_acquire("r", owner="o", ttl=timedelta(seconds=30)) is not None
+    assert (await leases.purge()).counts == {"af_leases": 0}
+    await expire("leases")
     assert (await leases.purge()).counts == {"af_leases": 1}
     assert (await leases.purge()).counts == {"af_leases": 0}

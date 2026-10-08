@@ -24,7 +24,8 @@ class RetentionPolicy:
 
     ``ttl`` of ``None`` (the default) means nothing ever expires. ``tombstone`` keeps
     the row with its ids, timestamps and revision and drops the payload;
-    ``delete`` removes the row. History messages and checkpoints are always deleted.
+    ``delete`` removes the row. History messages and checkpoints are always deleted, and so are
+    expired leases, which carry no policy.
     """
 
     ttl: timedelta | None = None
@@ -131,6 +132,8 @@ async def purge_rows(
     ``where`` may qualify columns with ``c``, the candidate row's alias. Rows another purge holds
     are skipped and taken by a later batch, so two purges never block each other.
     """
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1.")
     if mode == "tombstone" and tombstone is not None:
         candidates = sql.SQL(
             "SELECT c.ctid FROM {table} c WHERE ({where}) AND c.expires_at < now() AND c.purged_at IS NULL"
