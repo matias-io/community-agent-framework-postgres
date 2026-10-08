@@ -78,6 +78,22 @@ async def test_resave_keeps_position_and_replaces_content(persistence: PostgresP
     assert await storage.list_checkpoint_ids(workflow_name="wf") == ["a", "b"]
 
 
+async def test_resave_takes_over_a_row_of_another_payload_format(persistence: PostgresPersistence) -> None:
+    storage = persistence.checkpoint_storage(scope="c")
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(
+            sql.SQL(
+                "INSERT INTO {c} (application_id, tenant_id, scope, payload_format, workflow_name, checkpoint_id,"
+                " checkpoint_timestamp, payload) VALUES (%s, '', 'c', 'other', 'wf', 'a', now(), '{{}}')"
+            ).format(c=persistence.names.table("checkpoints")),
+            (storage.application_id,),
+        )
+    with pytest.raises(WorkflowCheckpointException):
+        await storage.load("a")
+    await storage.save(_checkpoint("wf", checkpoint_id="a", state={"n": 1}))
+    assert (await storage.load("a")).state == {"n": 1}
+
+
 async def test_delete(storage: PostgresCheckpointStorage) -> None:
     saved = _checkpoint()
     await storage.save(saved)

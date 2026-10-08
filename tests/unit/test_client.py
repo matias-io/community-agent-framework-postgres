@@ -41,10 +41,13 @@ def test_table_names_reject_prefix_that_overflows_identifier_limit() -> None:
 
 
 def test_table_names_bound_the_longest_derived_index_name() -> None:
-    names = TableNames(prefix="p" * 35)
-    assert names.index("history_messages_session_idx").as_string() == f'"{"p" * 35}history_messages_session_idx"'
+    names = TableNames(prefix="p" * 28)
+    assert (
+        names.index("history_messages_session_expiry_idx").as_string()
+        == f'"{"p" * 28}history_messages_session_expiry_idx"'
+    )
     with pytest.raises(ValueError):
-        TableNames(prefix="p" * 36)
+        TableNames(prefix="p" * 29)
 
 
 def test_empty_prefix_is_allowed() -> None:

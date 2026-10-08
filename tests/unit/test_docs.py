@@ -75,3 +75,8 @@ def test_readme_anchors_name_headings() -> None:
     for link in _markdown_links(readme):
         if link.startswith("#"):
             assert link[1:] in slugs, link
+
+
+def test_package_description_does_not_promise_documents() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert "document" not in project["description"]

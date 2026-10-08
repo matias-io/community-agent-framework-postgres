@@ -248,9 +248,10 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
 def whole_session_expired(history: sql.Identifier) -> sql.Composable:
     """Purge predicate on the candidate row ``c``: no message of its session is still live.
 
-    A session keeps its whole transcript until its newest message expires, so a conversation that
-    goes on never loses its head, and a tool call never loses its result. Nothing is rewritten on
-    save; the rule is applied at purge time.
+    A session's rows are deleted only when no row of the session is still live; a row written while
+    ``ttl`` was ``None`` has no expiry and keeps its whole session. A conversation that goes on
+    never loses its head, and a tool call never loses its result. Nothing is rewritten on save; the
+    rule is applied at purge time.
     """
     return sql.SQL(
         "c.application_id = %(app)s AND NOT EXISTS (SELECT 1 FROM {history} live"

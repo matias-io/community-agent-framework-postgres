@@ -28,7 +28,7 @@ PostgresClient: TypeAlias = AsyncConnection[Any] | AsyncConnectionPool[AsyncConn
 _SCHEMA = re.compile(r"[a-z_][a-z0-9_]*")
 _PREFIX = re.compile(r"[a-z0-9_]*")
 # The longest table or index suffix this package creates; a migration adding a longer one must update it.
-_LONGEST_IDENTIFIER = "history_messages_session_idx"
+_LONGEST_IDENTIFIER = "history_messages_session_expiry_idx"
 _MAX_IDENTIFIER_BYTES = 63
 # Bounds one connection attempt and how long a caller waits for a pooled connection. The pool
 # keeps retrying in the background, so a call fails fast and a later call recovers with the database.
@@ -71,7 +71,10 @@ class PostgresStorageError(IntegrationException):
     """A PostgreSQL operation failed; the driver exception is chained as the cause.
 
     ``sqlstate`` is the server's error code when there was one. ``retryable`` is ``True`` for
-    connection loss, serialization failures, deadlocks, pool timeouts and lock timeouts.
+    connection exceptions (class 08), transaction rollbacks such as serialization failures and
+    deadlocks (class 40), insufficient resources (class 53), server shutdown and admin
+    termination (57P0x), lock not available, which includes ``lock_timeout`` (55P03), pool
+    timeouts, and a connection lost without a SQLSTATE.
     """
 
     def __init__(self, message: str, *, sqlstate: str | None = None, retryable: bool = False) -> None:

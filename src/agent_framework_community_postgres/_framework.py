@@ -99,7 +99,8 @@ def log_untested_once() -> None:
         if kind is None:
             continue
         current = _major_minor(installed)
-        assert current is not None  # noqa: S101 - _newer returned a kind, so the version parsed
+        if current is None:
+            continue
         if kind == "major":
             advice = (
                 f"{name} {installed} is a new major version, outside the declared range and likely to break;"

@@ -10,7 +10,7 @@ The first release on PyPI.
 
 ### Added
 
-- Microsoft Entra ID sign-in for Azure Database for PostgreSQL: `credential=` on every store and on `PostgresPersistence` takes a sync or async `azure-identity` credential, and the owned pool uses a fresh token as the password of each new connection. A failing credential raises `PostgresStorageError` naming its error on the first call. `EntraCredential` and `ENTRA_SCOPE` are exported. See `docs/azure-entra.md`.
+- Microsoft Entra ID sign-in for Azure Database for PostgreSQL: `credential=` on every store and on `PostgresPersistence` takes a sync or async `azure-identity` credential, and the owned pool uses a fresh token as the password of each new connection. A failing credential raises `PostgresStorageError` naming its error on the first call. With a credential, `sslmode` defaults to `verify-full` with the system trust store, and `disable`, `allow` and `prefer` are refused. `EntraCredential` and `ENTRA_SCOPE` are exported. See `docs/azure-entra.md`.
 - The `azure` extra, which installs `azure-identity` and `aiohttp`, the async transport the `azure.identity.aio` credentials need.
 - `PostgresStorageError.sqlstate` and `.retryable`.
 - `pool_kwargs` on every store and the hub.
@@ -24,7 +24,7 @@ The first release on PyPI.
 
 - Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and `agent-framework-ag-ui` 1.5.0.
 - Owned pools set TCP keepalives and `tcp_user_timeout` unless the connection string or `pool_kwargs` sets them.
-- With `credential=`, `sslmode` defaults to `verify-full` with the system trust store, and `disable`, `allow` and `prefer` are refused.
+- The migration advisory lock key is now `hashtextextended` over the schema and table prefix; it was a crc32 of the schema-qualified migrations table name.
 - Purge runs in batches of 1000 rows, one transaction per batch, and the hub purge also removes expired leases.
 - Schema version 1 is the first released schema: checkpoints carry `tenant_id`, `payload_format` and a write `sequence`; every purged table has an expiry index; there is no document table. A database created by the unpublished 0.1.0 snapshot must be recreated.
 - Checkpoint `get_latest` and listing order by write order within a scope, not by `checkpoint.timestamp`, so a host whose clock runs behind cannot hide the checkpoint it wrote last. Saves in one scope take turns on an advisory lock, and re-saving an id replaces its content and keeps its position.

@@ -31,7 +31,7 @@ def test_render_can_select_versions() -> None:
 def test_every_identifier_fits_at_the_longest_allowed_prefix() -> None:
     # TableNames accepts a prefix up to the length that keeps its longest known identifier within 63 bytes.
     # If a migration adds a longer table or index name, this fails until _client._LONGEST_IDENTIFIER is updated.
-    longest_ok = "p" * 35
+    longest_ok = "p" * 28
     text = render(TableNames(prefix=longest_ok))
     for name in re.findall(r'"([^"]+)"', text):
         assert len(name.encode("utf-8")) <= 63, name
@@ -92,8 +92,7 @@ def test_longest_identifier_matches_the_migrations() -> None:
 
     text = render(TableNames(schema="public", prefix=""))
     names = {a or b for a, b in re.findall(r'"public"\."([a-z_]+)"|CREATE INDEX "([a-z_]+)"', text)}
-    # history_messages_session_idx and thread_snapshots_expires_idx are both 28 bytes, so compare lengths.
-    assert len(max(names, key=len)) == len(_LONGEST_IDENTIFIER)
+    assert max(names, key=len) == _LONGEST_IDENTIFIER
 
 
 def test_v1_creates_the_final_checkpoint_shape() -> None:

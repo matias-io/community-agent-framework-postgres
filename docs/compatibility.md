@@ -37,6 +37,8 @@ The first store or `PostgresPersistence` built in a process logs one warning for
 To silence the compatibility warning without hiding the package's other log lines, filter it on that logger rather than raising the logger's level:
 
 ```python
+import logging
+
 untested = "community-agent-framework-postgres has not been tested"
 logging.getLogger("agent_framework_community_postgres").addFilter(lambda r: not r.getMessage().startswith(untested))
 ```

@@ -77,6 +77,7 @@ BEGIN;
 SET LOCAL lock_timeout = '30000ms';
 CREATE TABLE "public"."af_history_messages" ( id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, application_id text NOT NULL, tenant_id text NOT NULL DEFAULT '', agent_id text NOT NULL DEFAULT '', source_id text NOT NULL, session_id text NOT NULL, message jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz);
 CREATE INDEX "af_history_messages_session_idx" ON "public"."af_history_messages" (application_id, tenant_id, agent_id, source_id, session_id, id);
+CREATE INDEX "af_history_messages_session_expiry_idx" ON "public"."af_history_messages" (application_id, tenant_id, agent_id, source_id, session_id, expires_at);
 CREATE INDEX "af_history_messages_expires_idx" ON "public"."af_history_messages" (expires_at) WHERE expires_at IS NOT NULL;
 CREATE TABLE "public"."af_sessions" ( application_id text NOT NULL, session_id text NOT NULL, snapshot jsonb, snapshot_version text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz, purged_at timestamptz, PRIMARY KEY (application_id, session_id));
 CREATE INDEX "af_sessions_expires_idx" ON "public"."af_sessions" (expires_at) WHERE expires_at IS NOT NULL;
@@ -97,7 +98,7 @@ An application that cannot run DDL can skip `migrate()` and call `hub.pending_mi
 
 | Table | Columns | Primary key | Indexes |
 |---|---|---|---|
-| `af_history_messages` | `id`, `application_id`, `tenant_id`, `agent_id`, `source_id`, `session_id`, `message`, `created_at`, `expires_at` | `id` | `(application_id, tenant_id, agent_id, source_id, session_id, id)`; `expires_at` where set |
+| `af_history_messages` | `id`, `application_id`, `tenant_id`, `agent_id`, `source_id`, `session_id`, `message`, `created_at`, `expires_at` | `id` | `(application_id, tenant_id, agent_id, source_id, session_id, id)`; `(application_id, tenant_id, agent_id, source_id, session_id, expires_at)`; `expires_at` where set |
 | `af_sessions` | `application_id`, `session_id`, `snapshot`, `snapshot_version`, `created_at`, `updated_at`, `expires_at`, `purged_at` | `application_id, session_id` | `expires_at` where set |
 | `af_checkpoints` | `application_id`, `tenant_id`, `scope`, `payload_format`, `workflow_name`, `checkpoint_id`, `previous_checkpoint_id`, `checkpoint_timestamp`, `sequence`, `payload`, `created_at`, `expires_at` | `application_id, tenant_id, scope, checkpoint_id` | `(application_id, tenant_id, scope, workflow_name, sequence)`; `expires_at` where set |
 | `af_thread_snapshots` | `application_id`, `scope`, `thread_id`, `messages`, `state`, `interrupt`, `session_state`, `created_at`, `updated_at`, `expires_at`, `purged_at` | `application_id, scope, thread_id` | `expires_at` where set |

@@ -1,7 +1,7 @@
 [project]
 name = "community-agent-framework-postgres"
 version = "0.1.1"
-description = "PostgreSQL storage for Microsoft Agent Framework: chat history, sessions, workflow checkpoints, AG-UI thread snapshots, documents and leases."
+description = "PostgreSQL storage for Microsoft Agent Framework: chat history, sessions, workflow checkpoints, AG-UI thread snapshots and leases."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

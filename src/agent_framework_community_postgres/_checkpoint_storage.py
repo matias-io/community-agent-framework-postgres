@@ -132,7 +132,7 @@ class PostgresCheckpointStorage(BaseStore):
                     " ON CONFLICT (application_id, tenant_id, scope, checkpoint_id) DO UPDATE SET"
                     " workflow_name = EXCLUDED.workflow_name, previous_checkpoint_id = EXCLUDED.previous_checkpoint_id,"
                     " checkpoint_timestamp = EXCLUDED.checkpoint_timestamp, payload = EXCLUDED.payload,"
-                    " expires_at = EXCLUDED.expires_at"
+                    " expires_at = EXCLUDED.expires_at, payload_format = EXCLUDED.payload_format"
                 ).format(checkpoints=self._names.table("checkpoints"), expires=EXPIRES_AT),
                 self._params()
                 | {

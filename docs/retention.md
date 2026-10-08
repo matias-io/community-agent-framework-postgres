@@ -20,14 +20,14 @@ A `ttl` of zero or less, or another `mode`, raises `ValueError`. Pass the policy
 Each write sets `expires_at` to the database's `now()` plus `ttl`. What that means depends on the table.
 
 - `af_sessions` and `af_thread_snapshots` keep one row per key and rewrite it. Expiry counts from the last write to that key.
-- `af_history_messages` adds one row per message. Each message's `expires_at` is a TTL after it was inserted and is never rewritten. A purge deletes a session's messages only once its newest message has expired, so an active session keeps its whole transcript.
+- `af_history_messages` adds one row per message. Each message's `expires_at` is a TTL after it was inserted and is never rewritten. A purge deletes a session's messages only when every one of them has expired, so an active session keeps its whole transcript. A message written while `ttl` was `None` has no expiry and keeps its whole session.
 - `af_checkpoints` adds one row per checkpoint. Each checkpoint expires a TTL after its save, so a long-running workflow loses its oldest checkpoints first. Saving the same `checkpoint_id` again resets that row.
 
 Rows written while `ttl` was `None` have no `expires_at` and are never purged. Changing the policy does not touch existing rows until they are written again. A purge acts on the `expires_at` already stored, so the object that runs it needs no policy of its own.
 
 ## What a purge does
 
-A purge acts on rows whose `expires_at` has passed. A history session is purged only once its newest message has expired; until then none of its messages are touched.
+A purge acts on rows whose `expires_at` has passed. A history session is purged only when no message of the session is still live, and a message with no `expires_at` is always live; until then none of its messages are touched.
 
 | Table | Tombstone mode | Delete mode |
 |---|---|---|
@@ -40,6 +40,8 @@ A purge acts on rows whose `expires_at` has passed. A history session is purged 
 A tombstone keeps the ids and timestamps and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again. Delete mode also removes rows an earlier purge tombstoned.
 
 A purge works in batches of 1000 rows, one transaction per batch, and keeps going until a batch comes back short. Each batch locks its rows with `FOR UPDATE SKIP LOCKED`, so two purges running at once take different rows and never wait on each other. A failure part way keeps the batches already committed.
+
+Measured on 2026-10-07 against PostgreSQL 17, 100k rows / 1k sessions: 100 history rows per session, every row expired except one in each of 50 sessions. One 1000-row history batch ran in 15 to 16 ms (`EXPLAIN ANALYZE`). The plan is a merge anti join of the expired rows against the session's live rows, both read through `af_history_messages_session_expiry_idx`. A full `purge()` took 1.2 s and deleted 95,000 rows, leaving the 50 sessions with a live row whole.
 
 An expired lease is already free, so deleting it changes nothing for holders. `hub.purge()` and `PostgresLeases.purge()` both delete expired leases.
 

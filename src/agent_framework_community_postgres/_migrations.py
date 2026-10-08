@@ -43,6 +43,10 @@ def _v1(names: TableNames) -> list[sql.Composed]:
         sql.SQL(
             "CREATE INDEX {idx} ON {history} (application_id, tenant_id, agent_id, source_id, session_id, id)"
         ).format(idx=i("history_messages_session_idx"), history=t("history_messages")),
+        # Serves the purge's per-session "is any row still live" probe.
+        sql.SQL(
+            "CREATE INDEX {idx} ON {history} (application_id, tenant_id, agent_id, source_id, session_id, expires_at)"
+        ).format(idx=i("history_messages_session_expiry_idx"), history=t("history_messages")),
         sql.SQL("CREATE INDEX {idx} ON {history} (expires_at) WHERE expires_at IS NOT NULL").format(
             idx=i("history_messages_expires_idx"), history=t("history_messages")
         ),
