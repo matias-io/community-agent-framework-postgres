@@ -17,6 +17,7 @@ The first release on PyPI.
 - `PostgresLeases.purge()`, which deletes the expired leases of its application and returns a `PurgeReport`.
 - `compatibility()` and `Compatibility`: the installed `agent-framework-core` and `agent-framework-ag-ui` next to the tested minors. The first store or hub built in a process logs one warning when a newer minor is installed. Importing the package has no side effects.
 - `migrate(lock_timeout=)`, `PostgresPersistence.current_version()`, `migrate --print --from-version N`.
+- `tenant_id` on `PostgresCheckpointStorage` and `PostgresPersistence.checkpoint_storage()`, part of the checkpoint row key next to `scope`.
 
 ### Changed
 
@@ -26,6 +27,9 @@ The first release on PyPI.
 - With `credential=`, `sslmode` defaults to `verify-full` with the system trust store, and `disable`, `allow` and `prefer` are refused.
 - Purge runs in batches of 1000 rows, one transaction per batch, and the hub purge also removes expired leases.
 - Schema version 1 is the first released schema: checkpoints carry `tenant_id`, `payload_format` and a write `sequence`; every purged table has an expiry index; there is no document table. A database created by the unpublished 0.1.0 snapshot must be recreated.
+- Checkpoint `get_latest` and listing order by write order within a scope, not by `checkpoint.timestamp`, so a host whose clock runs behind cannot hide the checkpoint it wrote last. Saves in one scope take turns on an advisory lock, and re-saving an id replaces its content and keeps its position.
+- Checkpoint `load` and `get_latest` raise `WorkflowCheckpointException` when the row fails to decode, instead of `get_latest` falling back to an older checkpoint. `list_checkpoints` still skips such rows with a warning.
+- `list_checkpoint_ids` reads ids without decoding, so it returns every id, including one whose row fails to decode.
 
 ### Removed
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_framework import SecretString, WorkflowCheckpoint
 from agent_framework.exceptions import WorkflowCheckpointException
@@ -24,18 +25,22 @@ logger = logging.getLogger(__name__)
 class PostgresCheckpointStorage(BaseStore):
     """PostgreSQL-backed workflow ``CheckpointStorage``.
 
-    Checkpoints are encoded exactly as ``FileCheckpointStorage`` and
-    ``CosmosCheckpointStorage`` encode them, so the same restricted deserializer and
-    ``allowed_checkpoint_types`` rules apply, and the same warning: the database is a
-    trust boundary because non-JSON values are pickled. A ``scope`` (for example a
-    conversation id) keeps one workflow's checkpoints apart per conversation; MAF's
-    protocol only knows ``workflow_name``.
+    Checkpoints are encoded exactly as ``FileCheckpointStorage`` and ``CosmosCheckpointStorage``
+    encode them, so the same restricted deserializer and ``allowed_checkpoint_types`` apply, and
+    the same warning: the table is a trust boundary, because non-JSON values are pickled. Rows are
+    keyed by application, optional ``tenant_id`` and ``scope`` (a conversation or response id, the
+    way Foundry hosting scopes its stores) and the checkpoint id. "Latest" is the last row written
+    in a scope, whatever clock produced it. Saving an existing id replaces its content and keeps
+    its position, as the framework's own stores do.
     """
+
+    PAYLOAD_FORMAT: ClassVar[str] = "agent-framework.python.checkpoint.v1"
 
     def __init__(
         self,
         *,
         application_id: str,
+        tenant_id: str | None = None,
         scope: str | None = None,
         allowed_checkpoint_types: list[str] | None = None,
         connection_string: str | SecretString | None = None,
@@ -60,11 +65,31 @@ class PostgresCheckpointStorage(BaseStore):
             retention=retention,
             pool_kwargs=pool_kwargs,
         )
+        self.tenant_id = optional_text(tenant_id, "tenant_id")
         self.scope = optional_text(scope, "scope")
         self._allowed_types: frozenset[str] = frozenset(allowed_checkpoint_types or [])
+        self._lock_key = json.dumps(
+            [
+                "agent-framework-postgres:checkpoints",
+                schema,
+                table_prefix,
+                self.application_id,
+                self.tenant_id,
+                self.scope,
+            ]
+        )
 
-    def _base(self) -> dict[str, Any]:
-        return {"app": self.application_id, "scope": self.scope}
+    _SCOPE = sql.SQL(
+        "application_id = %(app)s AND tenant_id = %(tenant)s AND scope = %(scope)s AND payload_format = %(format)s"
+    )
+
+    def _params(self) -> dict[str, Any]:
+        return {
+            "app": self.application_id,
+            "tenant": self.tenant_id,
+            "scope": self.scope,
+            "format": self.PAYLOAD_FORMAT,
+        }
 
     @staticmethod
     def _parse_timestamp(checkpoint: WorkflowCheckpoint) -> datetime:
@@ -74,12 +99,16 @@ class PostgresCheckpointStorage(BaseStore):
             raise WorkflowCheckpointException("A checkpoint has an unparsable timestamp.") from exc
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
-    def _decode(self, encoded: Any) -> WorkflowCheckpoint:
-        decoded = decode_checkpoint_value(encoded, allowed_types=self._allowed_types)
-        return WorkflowCheckpoint.from_dict(decoded)
+    def _decode(self, payload: Any) -> WorkflowCheckpoint:
+        try:
+            return WorkflowCheckpoint.from_dict(decode_checkpoint_value(payload, allowed_types=self._allowed_types))
+        except WorkflowCheckpointException:
+            raise
+        except Exception as exc:
+            raise WorkflowCheckpointException("A stored checkpoint cannot be restored.") from exc
 
     async def save(self, checkpoint: WorkflowCheckpoint) -> str:
-        """Encode, verify it can be restored under this store's allowed types, then upsert."""
+        """Encode, verify it can be restored under this store's allowed types, then write it."""
         when = self._parse_timestamp(checkpoint)
         try:
             encoded = encode_checkpoint_value(checkpoint.to_dict())
@@ -90,27 +119,28 @@ class PostgresCheckpointStorage(BaseStore):
             raise WorkflowCheckpointException(
                 "A checkpoint cannot be encoded or restored under this storage's allowed types."
             ) from exc
-        adapted = encode_jsonb(encoded, what="Checkpoint")
+        payload = encode_jsonb(encoded, what="Checkpoint")
         async with self._client.connection() as connection:
+            # Writers of one scope take turns, so sequence order is commit order.
+            await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (self._lock_key,))
             await connection.execute(
                 sql.SQL(
-                    "INSERT INTO {checkpoints} (application_id, scope, workflow_name, checkpoint_id,"
-                    " previous_checkpoint_id, checkpoint_timestamp, iteration_count, encoded, expires_at)"
-                    " VALUES (%(app)s, %(scope)s, %(workflow)s, %(id)s, %(previous)s, %(when)s, %(iteration)s,"
-                    " %(encoded)s, {expires})"
-                    " ON CONFLICT (application_id, scope, checkpoint_id) DO UPDATE SET"
+                    "INSERT INTO {checkpoints} (application_id, tenant_id, scope, payload_format, workflow_name,"
+                    " checkpoint_id, previous_checkpoint_id, checkpoint_timestamp, payload, expires_at)"
+                    " VALUES (%(app)s, %(tenant)s, %(scope)s, %(format)s, %(workflow)s, %(id)s, %(previous)s,"
+                    " %(when)s, %(payload)s, {expires})"
+                    " ON CONFLICT (application_id, tenant_id, scope, checkpoint_id) DO UPDATE SET"
                     " workflow_name = EXCLUDED.workflow_name, previous_checkpoint_id = EXCLUDED.previous_checkpoint_id,"
-                    " checkpoint_timestamp = EXCLUDED.checkpoint_timestamp, iteration_count = EXCLUDED.iteration_count,"
-                    " encoded = EXCLUDED.encoded, expires_at = EXCLUDED.expires_at"
+                    " checkpoint_timestamp = EXCLUDED.checkpoint_timestamp, payload = EXCLUDED.payload,"
+                    " expires_at = EXCLUDED.expires_at"
                 ).format(checkpoints=self._names.table("checkpoints"), expires=EXPIRES_AT),
-                self._base()
+                self._params()
                 | {
                     "workflow": checkpoint.workflow_name,
                     "id": checkpoint.checkpoint_id,
                     "previous": checkpoint.previous_checkpoint_id,
                     "when": when,
-                    "iteration": checkpoint.iteration_count,
-                    "encoded": adapted,
+                    "payload": payload,
                     "ttl": self._ttl(),
                 },
             )
@@ -118,79 +148,70 @@ class PostgresCheckpointStorage(BaseStore):
         return checkpoint.checkpoint_id
 
     async def load(self, checkpoint_id: str) -> WorkflowCheckpoint:
-        """The checkpoint with this id in this store's scope; ``WorkflowCheckpointException`` when absent."""
+        """The checkpoint with this id in this scope; ``WorkflowCheckpointException`` when absent or unreadable."""
         async with self._client.connection(transactional=False) as connection:
             cursor = await connection.execute(
-                sql.SQL(
-                    "SELECT encoded FROM {checkpoints}"
-                    " WHERE application_id = %(app)s AND scope = %(scope)s AND checkpoint_id = %(id)s"
-                ).format(checkpoints=self._names.table("checkpoints")),
-                self._base() | {"id": checkpoint_id},
+                sql.SQL("SELECT payload FROM {checkpoints} WHERE {scope} AND checkpoint_id = %(id)s").format(
+                    checkpoints=self._names.table("checkpoints"), scope=self._SCOPE
+                ),
+                self._params() | {"id": checkpoint_id},
             )
             row = await cursor.fetchone()
         if row is None:
             raise WorkflowCheckpointException("No checkpoint found with that ID in this scope.")
         return self._decode(row[0])
 
-    async def _rows(self, workflow_name: str, *, newest_first: bool = False, limit: int | None = None) -> list[Any]:
+    async def _rows(
+        self, workflow_name: str, *, column: sql.Identifier, newest_first: bool = False, limit: int | None = None
+    ) -> list[Any]:
         order = sql.SQL("DESC") if newest_first else sql.SQL("ASC")
-        async with self._client.connection() as connection:
+        async with self._client.connection(transactional=False) as connection:
             cursor = await connection.execute(
                 sql.SQL(
-                    "SELECT checkpoint_id, encoded FROM {checkpoints}"
-                    " WHERE application_id = %(app)s AND scope = %(scope)s AND workflow_name = %(workflow)s"
-                    " ORDER BY checkpoint_timestamp {order}, created_at {order} LIMIT %(limit)s"
-                ).format(checkpoints=self._names.table("checkpoints"), order=order),
-                self._base() | {"workflow": workflow_name, "limit": limit},
+                    "SELECT {column} FROM {checkpoints} WHERE {scope} AND workflow_name = %(workflow)s"
+                    " ORDER BY sequence {order} LIMIT %(limit)s"
+                ).format(column=column, checkpoints=self._names.table("checkpoints"), scope=self._SCOPE, order=order),
+                self._params() | {"workflow": workflow_name, "limit": limit},
             )
-            return await cursor.fetchall()
-
-    def _decoded(self, rows: list[Any]) -> Iterator[WorkflowCheckpoint]:
-        """Decode rows in order, logging and skipping any that fail (MAF's ``FileCheckpointStorage`` does the same)."""
-        for _checkpoint_id, encoded in rows:
-            try:
-                yield self._decode(encoded)
-            except Exception:
-                logger.warning("Skipping a checkpoint row that failed to decode.")
+            return [row[0] for row in await cursor.fetchall()]
 
     async def list_checkpoints(self, *, workflow_name: str) -> list[WorkflowCheckpoint]:
-        """Checkpoints for the workflow, oldest first; rows that fail to decode are logged and skipped."""
-        return list(self._decoded(await self._rows(workflow_name)))
+        """Checkpoints for the workflow in write order; rows that fail to decode are logged and skipped."""
+        found: list[WorkflowCheckpoint] = []
+        for payload in await self._rows(workflow_name, column=sql.Identifier("payload")):
+            try:
+                found.append(self._decode(payload))
+            except WorkflowCheckpointException:
+                logger.warning("Skipping a checkpoint row that failed to decode.")
+        return found
+
+    async def list_checkpoint_ids(self, *, workflow_name: str) -> list[str]:
+        """Every checkpoint id for the workflow in write order, without decoding any row."""
+        return await self._rows(workflow_name, column=sql.Identifier("checkpoint_id"))
+
+    async def get_latest(self, *, workflow_name: str) -> WorkflowCheckpoint | None:
+        """The last checkpoint written for the workflow in this scope, or ``None``; raises when it does not decode."""
+        rows = await self._rows(workflow_name, column=sql.Identifier("payload"), newest_first=True, limit=1)
+        return self._decode(rows[0]) if rows else None
 
     async def delete(self, checkpoint_id: str) -> bool:
         """Delete by id within this store's scope; ``True`` when a row existed."""
         async with self._client.connection() as connection:
             cursor = await connection.execute(
-                sql.SQL(
-                    "DELETE FROM {checkpoints}"
-                    " WHERE application_id = %(app)s AND scope = %(scope)s AND checkpoint_id = %(id)s"
-                ).format(checkpoints=self._names.table("checkpoints")),
-                self._base() | {"id": checkpoint_id},
+                sql.SQL("DELETE FROM {checkpoints} WHERE {scope} AND checkpoint_id = %(id)s").format(
+                    checkpoints=self._names.table("checkpoints"), scope=self._SCOPE
+                ),
+                self._params() | {"id": checkpoint_id},
             )
             return cursor.rowcount > 0
-
-    async def get_latest(self, *, workflow_name: str) -> WorkflowCheckpoint | None:
-        """The newest checkpoint that decodes, by its own timestamp, then by insertion time."""
-        newest = await self._rows(workflow_name, newest_first=True, limit=1)
-        if not newest:
-            return None
-        found = next(self._decoded(newest), None)
-        if found is not None:
-            return found
-        # The newest row is undecodable (already logged): walk the rest, newest first.
-        return next(self._decoded((await self._rows(workflow_name, newest_first=True))[1:]), None)
-
-    async def list_checkpoint_ids(self, *, workflow_name: str) -> list[str]:
-        """Ids of the checkpoints that decode, oldest first; the others are logged and skipped."""
-        return [checkpoint.checkpoint_id for checkpoint in await self.list_checkpoints(workflow_name=workflow_name)]
 
     async def purge(self) -> PurgeReport:
         """Delete expired checkpoints in this store's scope, whatever policy stamped them (no tombstone form)."""
         count = await purge_rows(
             self._client,
             table=self._names.table("checkpoints"),
-            where=sql.SQL("application_id = %(app)s AND scope = %(scope)s"),
-            params=self._base(),
+            where=sql.SQL("application_id = %(app)s AND tenant_id = %(tenant)s AND scope = %(scope)s"),
+            params={"app": self.application_id, "tenant": self.tenant_id, "scope": self.scope},
             mode="delete",
             tombstone=None,
         )

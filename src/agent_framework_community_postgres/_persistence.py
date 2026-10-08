@@ -119,11 +119,16 @@ class PostgresPersistence:
         return PostgresSessionStore(**self._common(kwargs))
 
     def checkpoint_storage(
-        self, *, scope: str | None = None, allowed_checkpoint_types: list[str] | None = None, **kwargs: Any
+        self,
+        *,
+        tenant_id: str | None = None,
+        scope: str | None = None,
+        allowed_checkpoint_types: list[str] | None = None,
+        **kwargs: Any,
     ) -> PostgresCheckpointStorage:
-        """A checkpoint storage on the shared pool, optionally scoped to one conversation."""
+        """A checkpoint storage on the shared pool, optionally scoped to one tenant and one conversation."""
         return PostgresCheckpointStorage(
-            scope=scope, allowed_checkpoint_types=allowed_checkpoint_types, **self._common(kwargs)
+            tenant_id=tenant_id, scope=scope, allowed_checkpoint_types=allowed_checkpoint_types, **self._common(kwargs)
         )
 
     def thread_snapshot_store(self, **kwargs: Any) -> PostgresAGUIThreadSnapshotStore:

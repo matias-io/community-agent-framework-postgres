@@ -8,8 +8,8 @@ import pytest
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowCheckpoint, WorkflowContext, handler
 from agent_framework.exceptions import WorkflowCheckpointException
 from psycopg import sql
-from psycopg.types.json import Jsonb
 
+from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._checkpoint_storage import PostgresCheckpointStorage
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._retention import RetentionPolicy
@@ -56,21 +56,26 @@ async def test_load_missing_raises(storage: PostgresCheckpointStorage) -> None:
         await storage.load("missing")
 
 
-async def test_listing_orders_by_timestamp_and_latest_wins(storage: PostgresCheckpointStorage) -> None:
-    base = datetime(2026, 9, 30, 12, tzinfo=UTC)
-    older = _checkpoint(timestamp=(base - timedelta(minutes=1)).isoformat())
-    newer = _checkpoint(timestamp=base.isoformat(), previous=older.checkpoint_id)
-    await storage.save(newer)
-    await storage.save(older)
-    assert [c.checkpoint_id for c in await storage.list_checkpoints(workflow_name="wf")] == [
-        older.checkpoint_id,
-        newer.checkpoint_id,
-    ]
-    assert await storage.list_checkpoint_ids(workflow_name="wf") == [older.checkpoint_id, newer.checkpoint_id]
+async def test_latest_ignores_producer_clock(persistence: PostgresPersistence) -> None:
+    storage = persistence.checkpoint_storage(scope="c")
+    await storage.save(_checkpoint("wf", checkpoint_id="a", timestamp="2026-01-01T00:10:00+00:00"))
+    # The second writer's clock is behind the first's; write order still decides.
+    await storage.save(_checkpoint("wf", checkpoint_id="b", timestamp="2026-01-01T00:00:00+00:00", previous="a"))
     latest = await storage.get_latest(workflow_name="wf")
-    assert latest is not None and latest.checkpoint_id == newer.checkpoint_id
+    assert latest is not None and latest.checkpoint_id == "b"
+    assert [c.checkpoint_id for c in await storage.list_checkpoints(workflow_name="wf")] == ["a", "b"]
+    assert await storage.list_checkpoint_ids(workflow_name="wf") == ["a", "b"]
     assert await storage.get_latest(workflow_name="other") is None
     assert await storage.list_checkpoints(workflow_name="other") == []
+
+
+async def test_resave_keeps_position_and_replaces_content(persistence: PostgresPersistence) -> None:
+    storage = persistence.checkpoint_storage(scope="c")
+    await storage.save(_checkpoint("wf", checkpoint_id="a", state={"n": 1}))
+    await storage.save(_checkpoint("wf", checkpoint_id="b", state={"n": 2}))
+    await storage.save(_checkpoint("wf", checkpoint_id="a", state={"n": 3}))
+    assert (await storage.load("a")).state == {"n": 3}
+    assert await storage.list_checkpoint_ids(workflow_name="wf") == ["a", "b"]
 
 
 async def test_delete(storage: PostgresCheckpointStorage) -> None:
@@ -138,28 +143,40 @@ async def test_retention_deletes_expired_checkpoints(
     assert await storage.list_checkpoints(workflow_name="wf") == []
 
 
-async def test_undecodable_rows_are_skipped_by_latest_and_ids(
-    storage: PostgresCheckpointStorage, client: ClientHandle, migrated: TableNames, caplog: pytest.LogCaptureFixture
+async def test_undecodable_row_raises_on_load_and_latest_but_keeps_its_id(
+    persistence: PostgresPersistence, caplog: pytest.LogCaptureFixture
 ) -> None:
-    base = datetime(2026, 9, 30, 12, tzinfo=UTC)
-    good = _checkpoint(workflow_name="secret-workflow", timestamp=(base - timedelta(minutes=1)).isoformat())
-    await storage.save(good)
-    async with client.connection() as connection:
+    storage = persistence.checkpoint_storage(scope="c")
+    await storage.save(_checkpoint("wf", checkpoint_id="ok"))
+    await storage.save(_checkpoint("wf", checkpoint_id="secret-bad"))
+    async with persistence._client.connection() as connection:  # noqa: SLF001
         await connection.execute(
             sql.SQL(
-                "INSERT INTO {} (application_id, scope, workflow_name, checkpoint_id, checkpoint_timestamp,"
-                " iteration_count, encoded) VALUES ('tests', '', 'secret-workflow', 'secret-bad-id', %s, 0, %s)"
-            ).format(migrated.table("checkpoints")),
-            (base, Jsonb({"not": "a checkpoint"})),
+                "UPDATE {c} SET payload = '{{\"not\": \"a checkpoint\"}}' WHERE checkpoint_id = 'secret-bad'"
+            ).format(c=persistence.names.table("checkpoints"))
         )
+    with pytest.raises(WorkflowCheckpointException) as on_load:
+        await storage.load("secret-bad")
+    assert "secret" not in str(on_load.value)
+    with pytest.raises(WorkflowCheckpointException):
+        await storage.get_latest(workflow_name="wf")
     with caplog.at_level(logging.WARNING):
-        latest = await storage.get_latest(workflow_name="secret-workflow")
-        ids = await storage.list_checkpoint_ids(workflow_name="secret-workflow")
-    assert latest is not None and latest.checkpoint_id == good.checkpoint_id
-    assert ids == [good.checkpoint_id]
-    assert [c.checkpoint_id for c in await storage.list_checkpoints(workflow_name="secret-workflow")] == ids
+        assert [c.checkpoint_id for c in await storage.list_checkpoints(workflow_name="wf")] == ["ok"]
     assert caplog.records
     assert all("secret" not in record.getMessage() for record in caplog.records)
+    assert await storage.list_checkpoint_ids(workflow_name="wf") == ["ok", "secret-bad"]
+    assert await storage.delete("secret-bad") is True
+
+
+async def test_tenant_and_scope_isolate(persistence: PostgresPersistence) -> None:
+    a = persistence.checkpoint_storage(tenant_id="t1", scope="c")
+    b = persistence.checkpoint_storage(tenant_id="t2", scope="c")
+    unscoped = persistence.checkpoint_storage()
+    await a.save(_checkpoint("wf", checkpoint_id="x"))
+    assert await b.get_latest(workflow_name="wf") is None
+    assert await unscoped.get_latest(workflow_name="wf") is None
+    with pytest.raises(WorkflowCheckpointException):
+        await b.load("x")
 
 
 class _Upper(Executor):
