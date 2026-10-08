@@ -32,7 +32,14 @@ report = compatibility()
 print(report.core_installed, report.core_tested, report.untested)
 ```
 
-The first store or `PostgresPersistence` built in a process logs one warning for each untested distribution on the `agent_framework_community_postgres` logger, naming the installed and tested versions. Later stores log nothing. Importing the package has no side effects, so `python -W error` and a pytest `filterwarnings = ["error"]` keep working on any version the declared range allows.
+The first store or `PostgresPersistence` built in a process logs one warning for each untested distribution on the `agent_framework_community_postgres` logger, naming the installed and tested versions. Later stores log nothing. The check logs through `logging` and never calls `warnings.warn`, and the package itself emits no warning or log line at import, so `python -W error` and a pytest `filterwarnings = ["error"]` are unaffected by the compatibility check.
+
+To silence the compatibility warning without hiding the package's other log lines, filter it on that logger rather than raising the logger's level:
+
+```python
+untested = "community-agent-framework-postgres has not been tested"
+logging.getLogger("agent_framework_community_postgres").addFilter(lambda r: not r.getMessage().startswith(untested))
+```
 
 For a newer minor, the warning means the combination has not been run here, not that it is known to fail, and it is expected to work. For a new major, which pip and uv only install when forced, the warning says it is outside the declared range and likely to break.
 

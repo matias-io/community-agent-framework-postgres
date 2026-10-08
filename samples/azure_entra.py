@@ -3,6 +3,8 @@
 Needs the ``azure`` extra and an Azure server with Entra authentication enabled. Set
 POSTGRES_CONNECTION_STRING to the host, database and role, without a password, for example
 ``host=my-server.postgres.database.azure.com dbname=agent_framework user=ada@contoso.com``.
+Without an ``sslmode`` there or in PGSSLMODE, the pool uses ``sslmode=verify-full`` with
+``sslrootcert=system``; ``disable``, ``allow`` and ``prefer`` raise ``ValueError``.
 DefaultAzureCredential finds a signed-in Azure CLI, environment variables or a managed identity.
 """
 
