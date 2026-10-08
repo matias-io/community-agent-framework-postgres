@@ -10,7 +10,7 @@
 
 The `azure` extra installs `azure-identity>=1.19,<2` and `aiohttp>=3.9,<4` for [Microsoft Entra ID sign-in](azure-entra.md).
 
-Python 3.15 is not supported yet. The samples and the test suite passed on 3.15.0b4 with `agent-framework-core` 1.20.0, but only a beta was tested, so the package does not claim it.
+Python 3.15 is not supported yet: 0.1.1 was not tested on it.
 
 ## Support policy
 
