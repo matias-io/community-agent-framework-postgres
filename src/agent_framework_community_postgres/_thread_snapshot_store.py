@@ -147,13 +147,12 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
 
     async def purge(self) -> PurgeReport:
         """Purge expired snapshots in this store's mode, whatever policy stamped them."""
-        async with self._client.connection() as connection:
-            count = await purge_rows(
-                connection,
-                table=self._names.table("thread_snapshots"),
-                where=sql.SQL("application_id = %(app)s"),
-                params={"app": self.application_id},
-                mode=self._retention.mode,
-                tombstone=sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
-            )
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("thread_snapshots"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode=self._retention.mode,
+            tombstone=sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
+        )
         return PurgeReport({f"{self._names.prefix}thread_snapshots": count})

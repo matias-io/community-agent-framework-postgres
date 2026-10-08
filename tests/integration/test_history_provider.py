@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
@@ -108,7 +109,9 @@ async def test_clear_and_list_sessions(history: PostgresHistoryProvider) -> None
     assert await history.list_sessions() == ["s2"]
 
 
-async def test_retention_deletes_expired_messages(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_deletes_expired_messages(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     """History has no tombstone form: expired messages are deleted whatever the policy's mode."""
     history = PostgresHistoryProvider(
         application_id="tests",
@@ -117,6 +120,6 @@ async def test_retention_deletes_expired_messages(client: ClientHandle, migrated
         retention=RetentionPolicy(ttl=timedelta(seconds=1), mode="tombstone"),
     )
     await history.save_messages("s", [Message(role="user", contents=["a"])])
-    await asyncio.sleep(1.5)
+    await expire("history_messages")
     assert (await history.purge()).counts == {"af_history_messages": 1}
     assert await history.get_messages("s") == []

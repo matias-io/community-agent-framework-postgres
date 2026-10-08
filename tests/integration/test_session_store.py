@@ -1,4 +1,4 @@
-import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
@@ -53,7 +53,9 @@ async def test_invalid_ids_are_rejected(sessions: PostgresSessionStore) -> None:
         await sessions.set("", AgentSession())
 
 
-async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_tombstones(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     store = PostgresSessionStore(
         application_id="tests",
         client=client.client,
@@ -61,7 +63,7 @@ async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) 
         retention=RetentionPolicy(ttl=timedelta(seconds=1)),
     )
     await store.set("k", AgentSession())
-    await asyncio.sleep(1.5)
+    await expire("sessions")
     assert (await store.purge()).counts == {"af_sessions": 1}
     assert await store.get("k") is None
     await store.set("k", AgentSession())

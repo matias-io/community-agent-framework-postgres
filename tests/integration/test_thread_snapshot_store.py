@@ -1,5 +1,5 @@
 # tests/integration/test_thread_snapshot_store.py
-import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
@@ -54,7 +54,9 @@ async def test_empty_scope_or_thread_is_rejected(snapshots: PostgresAGUIThreadSn
         await snapshots.save(scope="u", thread_id="", snapshot=_snapshot(1))
 
 
-async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_tombstones(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     store = PostgresAGUIThreadSnapshotStore(
         application_id="tests",
         client=client.client,
@@ -62,7 +64,7 @@ async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) 
         retention=RetentionPolicy(ttl=timedelta(seconds=1)),
     )
     await store.save(scope="u", thread_id="t", snapshot=_snapshot(1))
-    await asyncio.sleep(1.5)
+    await expire("thread_snapshots")
     assert (await store.purge()).counts == {"af_thread_snapshots": 1}
     assert await store.get(scope="u", thread_id="t") is None
     assert await store.delete(scope="u", thread_id="t") is False  # a tombstone is not a live snapshot

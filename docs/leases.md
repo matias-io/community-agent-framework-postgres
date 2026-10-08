@@ -70,4 +70,4 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
 
 ## Retention
 
-Lease rows are not purged. An expired row stays until the next acquisition of the same resource replaces it. See [retention.md](retention.md).
+An expired lease row stays until the next acquisition of the same resource replaces it or a purge deletes it. `leases.purge()` deletes the expired leases of its `application_id` and returns a `PurgeReport` with an `af_leases` count. `hub.purge()` and the `purge` CLI command do the same. An expired lease is already free, so a purge never takes a lease from a holder. See [retention.md](retention.md).

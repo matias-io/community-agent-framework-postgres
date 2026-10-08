@@ -5,9 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any, Literal, NoReturn, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Self, cast
 
-from psycopg import AsyncConnection, sql
+from psycopg import sql
+
+if TYPE_CHECKING:
+    from ._client import ClientHandle
 
 RetentionMode = Literal["tombstone", "delete"]
 
@@ -114,23 +117,40 @@ class PurgeReport:
 
 
 async def purge_rows(
-    connection: AsyncConnection[Any],
+    client: ClientHandle,
     *,
     table: sql.Identifier,
     where: sql.Composable,
     params: Mapping[str, Any],
     mode: RetentionMode,
     tombstone: sql.Composable | None,
+    batch_size: int = 1000,
 ) -> int:
-    """Tombstone or delete the expired rows matching ``where``; return the count."""
+    """Tombstone or delete the expired rows matching ``where``, ``batch_size`` rows per transaction.
+
+    ``where`` may qualify columns with ``c``, the candidate row's alias. Rows another purge holds
+    are skipped and taken by a later batch, so two purges never block each other.
+    """
     if mode == "tombstone" and tombstone is not None:
-        statement = sql.SQL(
-            "UPDATE {table} SET {tombstone}, purged_at = now() WHERE ({where})"
-            " AND expires_at < now() AND purged_at IS NULL"
-        ).format(table=table, tombstone=tombstone, where=where)
-    else:
-        statement = sql.SQL("DELETE FROM {table} WHERE ({where}) AND expires_at < now()").format(
-            table=table, where=where
+        candidates = sql.SQL(
+            "SELECT c.ctid FROM {table} c WHERE ({where}) AND c.expires_at < now() AND c.purged_at IS NULL"
+            " LIMIT %(batch)s FOR UPDATE SKIP LOCKED"
         )
-    cursor = await connection.execute(statement, dict(params))
-    return cursor.rowcount
+        statement = sql.SQL("UPDATE {table} SET {tombstone}, purged_at = now() WHERE ctid IN ({candidates})")
+    else:
+        candidates = sql.SQL(
+            "SELECT c.ctid FROM {table} c WHERE ({where}) AND c.expires_at < now()"
+            " LIMIT %(batch)s FOR UPDATE SKIP LOCKED"
+        )
+        statement = sql.SQL("DELETE FROM {table} WHERE ctid IN ({candidates})")
+    composed = statement.format(
+        table=table, tombstone=tombstone or sql.SQL(""), candidates=candidates.format(table=table, where=where)
+    )
+    total = 0
+    while True:
+        async with client.connection() as connection:
+            cursor = await connection.execute(composed, dict(params) | {"batch": batch_size})
+            count = cursor.rowcount
+        total += count
+        if count < batch_size:
+            return total

@@ -35,15 +35,19 @@ A purge acts on rows whose `expires_at` has passed.
 | `af_sessions` | `snapshot` set to `NULL` | Deleted |
 | `af_checkpoints` | Deleted | Deleted |
 | `af_thread_snapshots` | `messages`, `state`, `interrupt`, `session_state` set to `NULL` | Deleted |
-| `af_leases` | Not purged | Not purged |
+| `af_leases` | Deleted | Deleted |
 
-A tombstone keeps the ids, timestamps and revision and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again.
+A tombstone keeps the ids, timestamps and revision and sets `purged_at`. Reads treat a tombstoned row as absent. The next write to the same key stores new data and clears `purged_at`. A row that is already tombstoned is not counted again. Delete mode also removes rows an earlier purge tombstoned.
+
+A purge works in batches of 1000 rows, one transaction per batch, and keeps going until a batch comes back short. Each batch locks its rows with `FOR UPDATE SKIP LOCKED`, so two purges running at once take different rows and never wait on each other. A failure part way keeps the batches already committed.
+
+An expired lease is already free, so deleting it changes nothing for holders. `hub.purge()` and `PostgresLeases.purge()` both delete expired leases.
 
 `purge()` returns a `PurgeReport`. `report.counts` maps each table name to the rows it changed, and `report.total` is the sum. `counts` is a read-only mapping, not a `dict`; `dict(report.counts)` gives a copy you can change. A report pickles, copies and works with `dataclasses.asdict`.
 
 ## Scope of a purge
 
-- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, and all checkpoint scopes. Each table is purged in its own transaction, so a failure part way keeps the tables already purged.
+- `hub.purge()` covers every row of the hub's `application_id` in every table. That includes all history sources, tenants and agents, and all checkpoint scopes, and the hub's leases.
 - A store's `purge()` covers that store's rows only. The history provider covers its application, tenant, agent and source. A checkpoint storage covers its scope.
 - A purge acts on every expired row in its scope, whichever policy stamped it. A hub or store built without a policy still purges rows another store wrote with one.
 - `hub.purge(mode=None)` uses `mode` when you pass it, otherwise the hub policy's mode, which defaults to `"tombstone"`. A store's `purge()` uses its own policy's mode.

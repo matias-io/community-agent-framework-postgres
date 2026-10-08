@@ -16,7 +16,7 @@ from psycopg import sql
 
 from ._client import ClientHandle, LeaseLost, LeaseUnavailable, PostgresClient, require_text
 from ._entra import EntraCredential
-from ._retention import RetentionPolicy
+from ._retention import PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,18 @@ class PostgresLeases(BaseStore):
                 logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
             raise
         await lease.release()
+
+    async def purge(self) -> PurgeReport:
+        """Delete leases whose expiry has passed; an expired lease is already free, so nothing changes hands."""
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("leases"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode="delete",
+            tombstone=None,
+        )
+        return PurgeReport({f"{self._names.prefix}leases": count})
 
     def _lease_params(self, lease: Lease) -> dict[str, object]:
         return {"app": self.application_id, "resource": lease.resource, "owner": lease.owner, "token": lease.token}

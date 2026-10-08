@@ -186,13 +186,12 @@ class PostgresCheckpointStorage(BaseStore):
 
     async def purge(self) -> PurgeReport:
         """Delete expired checkpoints in this store's scope, whatever policy stamped them (no tombstone form)."""
-        async with self._client.connection() as connection:
-            count = await purge_rows(
-                connection,
-                table=self._names.table("checkpoints"),
-                where=sql.SQL("application_id = %(app)s AND scope = %(scope)s"),
-                params=self._base(),
-                mode="delete",
-                tombstone=None,
-            )
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("checkpoints"),
+            where=sql.SQL("application_id = %(app)s AND scope = %(scope)s"),
+            params=self._base(),
+            mode="delete",
+            tombstone=None,
+        )
         return PurgeReport({f"{self._names.prefix}checkpoints": count})

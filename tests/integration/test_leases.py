@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
@@ -61,21 +62,25 @@ async def test_one_holder_per_acquisition_even_with_one_owner(leases: PostgresLe
     await b.release()
 
 
-async def test_a_crashed_holder_is_taken_over_after_expiry(leases: PostgresLeases) -> None:
+async def test_a_crashed_holder_is_taken_over_after_expiry(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     crashed = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=1))
     assert crashed is not None
     assert await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30)) is None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     recovered = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30))
     assert recovered is not None
     await recovered.renew()
     await recovered.release()
 
 
-async def test_expired_lease_is_taken_over_and_old_holder_learns_on_renew(leases: PostgresLeases) -> None:
+async def test_expired_lease_is_taken_over_and_old_holder_learns_on_renew(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     first = await leases.try_acquire("threads/d", owner="one", ttl=timedelta(seconds=1))
     assert first is not None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     async with leases.acquire("threads/d", owner="two", ttl=timedelta(seconds=30), wait=timedelta(seconds=2)):
         with pytest.raises(LeaseLost):
             await first.renew()
@@ -115,10 +120,12 @@ async def test_release_failure_surfaces_when_the_body_succeeded(persistence: Pos
             await persistence.close()
 
 
-async def test_expired_lease_nobody_took_raises_lease_lost_on_renew(leases: PostgresLeases) -> None:
+async def test_expired_lease_nobody_took_raises_lease_lost_on_renew(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     lease = await leases.try_acquire("threads/i", owner="one", ttl=timedelta(seconds=1))
     assert lease is not None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     with pytest.raises(LeaseLost):
         await lease.renew()
 
@@ -131,7 +138,9 @@ async def test_lease_is_released_when_the_body_raises(leases: PostgresLeases) ->
     assert other is not None
 
 
-async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(leases: PostgresLeases) -> None:
+async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     resource = "threads/secret-visitor"
     async with leases.acquire(resource, owner="one", ttl=timedelta(seconds=1)) as lease:
         with pytest.raises(LeaseUnavailable) as unavailable:
@@ -139,8 +148,16 @@ async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(leases
                 pass
         assert "secret" not in str(unavailable.value)
         assert unavailable.value.resource == resource
-        await asyncio.sleep(1.5)
+        await expire("leases")
         with pytest.raises(LeaseLost) as lost:
             await lease.renew()
         assert "secret" not in str(lost.value)
         assert lost.value.resource == resource
+
+
+async def test_purge_deletes_expired_leases(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    assert await leases.try_acquire("r", owner="o", ttl=timedelta(milliseconds=50)) is not None
+    await asyncio.sleep(0.1)
+    assert (await leases.purge()).counts == {"af_leases": 1}
+    assert (await leases.purge()).counts == {"af_leases": 0}

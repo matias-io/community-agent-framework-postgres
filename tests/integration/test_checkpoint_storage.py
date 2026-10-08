@@ -1,6 +1,6 @@
-import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -123,7 +123,9 @@ async def test_unregistered_type_is_refused_at_save_and_allowed_when_listed(
     assert (await permissive.load(saved.checkpoint_id)).state["app"] == _AppState(1)
 
 
-async def test_retention_deletes_expired_checkpoints(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_deletes_expired_checkpoints(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     storage = PostgresCheckpointStorage(
         application_id="tests",
         client=client.client,
@@ -131,7 +133,7 @@ async def test_retention_deletes_expired_checkpoints(client: ClientHandle, migra
         retention=RetentionPolicy(ttl=timedelta(seconds=1)),
     )
     await storage.save(_checkpoint())
-    await asyncio.sleep(1.5)
+    await expire("checkpoints")
     assert (await storage.purge()).counts == {"af_checkpoints": 1}
     assert await storage.list_checkpoints(workflow_name="wf") == []
 

@@ -111,13 +111,12 @@ class PostgresSessionStore(SessionStore, BaseStore):
 
     async def purge(self) -> PurgeReport:
         """Purge expired sessions in this store's mode, whatever policy stamped them."""
-        async with self._client.connection() as connection:
-            count = await purge_rows(
-                connection,
-                table=self._names.table("sessions"),
-                where=sql.SQL("application_id = %(app)s"),
-                params={"app": self.application_id},
-                mode=self._retention.mode,
-                tombstone=sql.SQL("snapshot = NULL"),
-            )
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("sessions"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode=self._retention.mode,
+            tombstone=sql.SQL("snapshot = NULL"),
+        )
         return PurgeReport({f"{self._names.prefix}sessions": count})
