@@ -32,7 +32,8 @@ PostgresAGUIThreadSnapshotStore(*, application_id, ...)
 - `scope` and `thread_id` must be non-empty strings. Anything else raises `ValueError`. The in-memory store raises `TypeError` for a non-string.
 - `get` returns `None` when the thread is absent or purged.
 - `delete` returns `True` when a live snapshot existed. A tombstoned row is removed too, and `delete` returns `False` for it, as `get` reports it absent.
-- `clear()` removes every snapshot of this application. `clear(scope=...)` removes one scope's.
+- `clear(scope=...)` removes every snapshot of one scope. `clear()` with no scope, or `scope=None`, removes every snapshot of this application in every scope, as the `AGUIThreadSnapshotStore` protocol defines it. An empty or non-string scope raises `ValueError`.
+- Do not pass a scope resolver's result straight to `clear`. A resolver that returns `None` for an unauthenticated request would clear every user's snapshots. Check for `None` first.
 
 To use it with the AG-UI endpoint, pass it as `snapshot_store` to `add_agent_framework_fastapi_endpoint`, together with a `snapshot_scope_resolver`.
 

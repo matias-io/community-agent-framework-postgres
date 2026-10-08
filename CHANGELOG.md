@@ -30,6 +30,8 @@ The first release on PyPI.
 - Checkpoint `get_latest` and listing order by write order within a scope, not by `checkpoint.timestamp`, so a host whose clock runs behind cannot hide the checkpoint it wrote last. Saves in one scope take turns on an advisory lock, and re-saving an id replaces its content and keeps its position.
 - Checkpoint `load` and `get_latest` raise `WorkflowCheckpointException` when the row fails to decode, instead of `get_latest` falling back to an older checkpoint. `list_checkpoints` still skips such rows with a warning.
 - `list_checkpoint_ids` reads ids without decoding, so it returns every id, including one whose row fails to decode.
+- `PostgresSessionStore.get` raises `ValueError` when the stored snapshot has an unsupported `snapshot_version` or is not a JSON object, as MAF's `FileSessionStore` does for an unreadable file, instead of returning `None` as if the session were absent. A purged session still returns `None`.
+- `PostgresAGUIThreadSnapshotStore.clear` follows the AG-UI protocol signature, `clear(*, scope=None)`: no scope removes every snapshot of the application, a scope removes that scope's. An empty scope raises `ValueError`.
 
 ### Removed
 

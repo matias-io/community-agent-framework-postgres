@@ -5,6 +5,7 @@ from datetime import timedelta
 import pytest
 from agent_framework_ag_ui import AGUIThreadSnapshot
 
+from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._retention import RetentionPolicy
 from agent_framework_community_postgres._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
@@ -71,3 +72,22 @@ async def test_retention_tombstones(
     await store.save(scope="u", thread_id="t", snapshot=_snapshot(2))
     assert await store.delete(scope="u", thread_id="t") is True
     assert await store.delete(scope="u", thread_id="t") is False
+
+
+async def test_clear_follows_the_protocol_and_refuses_an_empty_scope(persistence: PostgresPersistence) -> None:
+    store = persistence.thread_snapshot_store()
+    other = PostgresAGUIThreadSnapshotStore(
+        application_id="other", client=persistence.pool, schema=persistence.names.schema
+    )
+    snapshot = AGUIThreadSnapshot(messages=[], state=None, interrupt=None, session_state=None)
+    await store.save(scope="u1", thread_id="t", snapshot=snapshot)
+    await store.save(scope="u2", thread_id="t", snapshot=snapshot)
+    await other.save(scope="u1", thread_id="t", snapshot=snapshot)
+    with pytest.raises(ValueError):
+        await store.clear(scope="")
+    await store.clear(scope="u1")
+    assert await store.get(scope="u1", thread_id="t") is None
+    assert await store.get(scope="u2", thread_id="t") is not None
+    await store.clear()
+    assert await store.get(scope="u2", thread_id="t") is None
+    assert await other.get(scope="u1", thread_id="t") is not None

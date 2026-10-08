@@ -24,6 +24,8 @@ class PostgresSessionStore(SessionStore, BaseStore):
     ``AgentSession.from_dict``. Restore a session with the same agent and provider
     configuration that created it, as the framework documents. ``SessionStore`` is
     marked experimental upstream; this implementation follows it.
+    Writes are last-writer-wins, as with the framework's ``SessionStore``; serialize
+    concurrent runs of one session in the host.
     """
 
     SNAPSHOT_VERSION: ClassVar[str] = "1"
@@ -58,7 +60,11 @@ class PostgresSessionStore(SessionStore, BaseStore):
         )
 
     async def get(self, session_id: str) -> AgentSession | None:
-        """A fresh copy of the stored session, or ``None`` when absent or purged."""
+        """A fresh copy of the stored session, or ``None`` when absent or purged.
+
+        Raises:
+            ValueError: The row holds a snapshot this release cannot read. Delete it to start over.
+        """
         SessionStore.validate_session_id(session_id)
         async with (
             self._client.connection(transactional=False) as connection,
@@ -66,13 +72,20 @@ class PostgresSessionStore(SessionStore, BaseStore):
         ):
             await cursor.execute(
                 sql.SQL(
-                    "SELECT snapshot, purged_at FROM {sessions} WHERE application_id = %(app)s AND session_id = %(id)s"
+                    "SELECT snapshot, snapshot_version, purged_at FROM {sessions}"
+                    " WHERE application_id = %(app)s AND session_id = %(id)s"
                 ).format(sessions=self._names.table("sessions")),
                 {"app": self.application_id, "id": session_id},
             )
             row = await cursor.fetchone()
-        if row is None or row["purged_at"] is not None or not isinstance(row["snapshot"], dict):
+        if row is None or row["purged_at"] is not None:
             return None
+        if row["snapshot_version"] != self.SNAPSHOT_VERSION:
+            raise ValueError(
+                f"Unsupported session snapshot version {row['snapshot_version']!r}; expected {self.SNAPSHOT_VERSION!r}."
+            )
+        if not isinstance(row["snapshot"], dict):
+            raise ValueError("The stored session snapshot is not an object.")
         return AgentSession.from_dict(cast(dict[str, Any], row["snapshot"]))
 
     async def set(self, session_id: str, session: AgentSession) -> None:
