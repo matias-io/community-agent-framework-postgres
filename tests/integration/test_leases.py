@@ -175,6 +175,21 @@ async def test_concurrent_acquisitions_have_one_winner(persistence: PostgresPers
     assert sum(1 for r in results if r is not None) == 1
 
 
+async def test_concurrent_acquisitions_under_repeatable_read(
+    test_dsn: str, schema: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Under REPEATABLE READ a losing upsert raises a serialization failure instead of returning no lease.
+    monkeypatch.setenv("PGOPTIONS", r"-c default_transaction_isolation=repeatable\ read")
+    async with PostgresPersistence(application_id="tests", connection_string=test_dsn, schema=schema) as hub:
+        await hub.migrate()
+        leases = hub.leases()
+        for round_number in range(5):
+            results = await asyncio.gather(
+                *(leases.try_acquire(f"r{round_number}", owner=f"o{i}", ttl=timedelta(seconds=5)) for i in range(16))
+            )
+            assert sum(1 for r in results if r is not None) == 1
+
+
 async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPersistence) -> None:
     leases = persistence.leases()
     entered = asyncio.Event()

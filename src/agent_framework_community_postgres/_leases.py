@@ -105,7 +105,7 @@ class PostgresLeases(BaseStore):
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive.")
         token = uuid.uuid4().hex
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "INSERT INTO {leases} (application_id, resource, owner, token, expires_at)"
@@ -172,7 +172,7 @@ class PostgresLeases(BaseStore):
         return {"app": self.application_id, "resource": lease.resource, "owner": lease.owner, "token": lease.token}
 
     async def _renew(self, lease: Lease) -> None:
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "UPDATE {leases} SET expires_at = now() + %(ttl)s"
@@ -185,7 +185,7 @@ class PostgresLeases(BaseStore):
                 raise LeaseLost("The lease expired or was taken over.", resource=lease.resource)
 
     async def _release(self, lease: Lease) -> None:
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(
                 sql.SQL(
                     "DELETE FROM {leases}"

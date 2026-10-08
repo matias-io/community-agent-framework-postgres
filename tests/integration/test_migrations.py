@@ -62,6 +62,22 @@ async def test_concurrent_first_runs_apply_once_and_never_raise(test_dsn: str, s
         assert all(r.current == 1 for r in reports)
 
 
+async def test_concurrent_first_runs_under_repeatable_read(
+    test_dsn: str, schema: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A waiting replica's snapshot would predate the version another replica committed; it would rerun v1.
+    monkeypatch.setenv("PGOPTIONS", r"-c default_transaction_isolation=repeatable\ read")
+    for round_number in range(5):
+        names = TableNames(schema=schema, prefix=f"rr{round_number}_")
+        clients = [ClientHandle(SecretString(test_dsn), None) for _ in range(4)]
+        try:
+            reports = await asyncio.gather(*(migrate(c, names) for c in clients))
+        finally:
+            for c in clients:
+                await c.close()
+        assert sorted(r.applied for r in reports) == [(), (), (), (1,)]
+
+
 _NEWER = "Database schema version 99 is newer than this package supports (1); upgrade the package."
 
 

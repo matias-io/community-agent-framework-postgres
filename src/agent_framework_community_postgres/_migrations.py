@@ -209,12 +209,14 @@ async def migrate(
     lock_key = json.dumps(["agent-framework-postgres:migrations", names.schema, names.prefix])
     timeout = _lock_timeout_literal(lock_timeout)
     applied: list[int] = []
-    async with client.connection() as connection:
+    # READ COMMITTED in both blocks: a statement after the lock must see what another replica committed while
+    # this one waited, which a REPEATABLE READ snapshot taken by the lock statement itself would hide.
+    async with client.connection(read_committed=True) as connection:
         # The lock also covers the CREATE TABLE IF NOT EXISTS, which races on pg_type when two processes start fresh.
         await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
         await connection.execute(_version_table(names))
     for version in await pending_versions(client, names):
-        async with client.connection() as connection:
+        async with client.connection(read_committed=True) as connection:
             await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
             cursor = await connection.execute(
                 sql.SQL("SELECT 1 FROM {migrations} WHERE version = %s").format(migrations=names.table("migrations")),
