@@ -41,7 +41,9 @@ A tombstone keeps the ids and timestamps and sets `purged_at`. Reads treat a tom
 
 A purge works in batches of 1000 rows, one transaction per batch, and keeps going until a batch comes back short. Each batch locks its rows with `FOR UPDATE SKIP LOCKED`, so two purges running at once take different rows and never wait on each other. A failure part way keeps the batches already committed.
 
-Measured on 2026-10-07 against PostgreSQL 17, 100k rows / 1k sessions: 100 history rows per session, every row expired except one in each of 50 sessions. One 1000-row history batch ran in 15 to 16 ms (`EXPLAIN ANALYZE`). The plan is a merge anti join of the expired rows against the session's live rows, both read through `af_history_messages_session_expiry_idx`. A full `purge()` took 1.2 s and deleted 95,000 rows, leaving the 50 sessions with a live row whole.
+Measured on 2026-10-07 against PostgreSQL 17, 100k rows / 1k sessions: 100 history rows per session, every row expired except one in each of 50 sessions. One 1000-row history batch ran in 14.7 and 15.9 ms over two runs (`EXPLAIN ANALYZE`). The plan is a merge anti join of the expired rows against the session's live rows, both read through `af_history_messages_session_expiry_idx`. A full `purge()` took 1.18 s and deleted 95,000 rows, leaving the 50 sessions with a live row whole. Without that index the same batch took 18.2 ms and the full purge 1.35 s.
+
+Each history batch reads every live row in the scope being purged, so its cost grows with the number of live rows in that scope, not with the batch size. A scope holding millions of live history rows makes every batch correspondingly slower; measure on your own data before scheduling a purge against a table that size.
 
 An expired lease is already free, so deleting it changes nothing for holders. `hub.purge()` and `PostgresLeases.purge()` both delete expired leases.
 
