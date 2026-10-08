@@ -18,6 +18,8 @@ PostgresLeases(*, application_id, ...)
 
 `acquire(resource, *, owner, ttl, wait=timedelta(0))` is an async context manager that holds the lease on `resource`. The lease is released when the block exits. If the block raises and the release then fails, for example because the database is down, a warning is logged on the `agent_framework_community_postgres._leases` logger and the block's own exception propagates. The lease then frees itself when its `ttl` passes.
 
+After a block that raised or was cancelled, the release waits at most 5 seconds. A slow database therefore holds a cancelled task for 5 seconds at most; when the bound passes, the warning above is logged and the block's exception propagates. The release itself is shielded from cancellation, so it keeps running in the background and still frees the lease if the database answers later. A second cancel during those 5 seconds propagates at once. If the release never completes, the lease frees itself when its `ttl` passes.
+
 `try_acquire(resource, *, owner, ttl)` takes the lease once and returns a `Lease`, or `None` when it is held. You release that lease yourself with `lease.release()`.
 
 - The database clock decides expiry, so clock drift between processes does not matter.

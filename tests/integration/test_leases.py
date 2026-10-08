@@ -164,3 +164,28 @@ async def test_purge_deletes_expired_leases(
     await expire("leases")
     assert (await leases.purge()).counts == {"af_leases": 1}
     assert (await leases.purge()).counts == {"af_leases": 0}
+
+
+async def test_concurrent_acquisitions_have_one_winner(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    results = await asyncio.gather(
+        *(leases.try_acquire("r", owner=f"o{i}", ttl=timedelta(seconds=5)) for i in range(16))
+    )
+    assert sum(1 for r in results if r is not None) == 1
+
+
+async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    entered = asyncio.Event()
+
+    async def hold() -> None:
+        async with leases.acquire("r", owner="o", ttl=timedelta(seconds=30)):
+            entered.set()
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(hold())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await leases.try_acquire("r", owner="other", ttl=timedelta(seconds=1)) is not None

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _FIRST_DELAY = 0.1
 _MAX_DELAY = 2.0
+_RELEASE_SECONDS = 5.0
 
 
 class Lease:
@@ -127,8 +128,10 @@ class PostgresLeases(BaseStore):
         try:
             yield lease
         except BaseException:
+            # The block may have been cancelled; the release still runs, shielded and bounded, so a slow
+            # database cannot hold a cancelling task. An unreleased lease frees itself on expiry.
             try:
-                await lease.release()
+                await asyncio.wait_for(asyncio.shield(lease.release()), timeout=_RELEASE_SECONDS)
             except Exception:
                 logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
             raise

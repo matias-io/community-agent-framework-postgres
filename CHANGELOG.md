@@ -37,6 +37,7 @@ The first release on PyPI.
 - A history save reads only the newest stored messages, as many as it was given, to deduplicate, instead of the whole session. The result is the same under MAF 1.20's `filter_new_messages`, and a save no longer slows down as a session grows.
 - A history save raises `PostgresStorageError` when a stored message it needs for deduplication no longer deserializes, instead of skipping it and possibly storing a replay twice. `get_messages` still skips such rows with a warning.
 - History retention keeps a session whole: a purge deletes a session's messages only once all of them have expired, instead of deleting an active session's oldest messages.
+- A lease's release after a failed or cancelled block is bounded to 5 s.
 
 ### Removed
 
