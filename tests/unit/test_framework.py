@@ -60,7 +60,7 @@ def test_compatibility_reports_installed_and_tested(monkeypatch: pytest.MonkeyPa
 
 
 def test_a_newer_minor_is_untested(monkeypatch: pytest.MonkeyPatch) -> None:
-    _installed(monkeypatch, agent_framework_core="1.21.0", agent_framework_ag_ui="1.6.0")
+    _installed(monkeypatch, agent_framework_core="1.22.0", agent_framework_ag_ui="1.6.0")
     report = _framework.compatibility()
     assert report.untested == ("agent-framework-core", "agent-framework-ag-ui")
     assert report.out_of_range == ()
@@ -73,7 +73,7 @@ def test_a_newer_major_is_out_of_range(monkeypatch: pytest.MonkeyPatch) -> None:
     assert report.out_of_range == ("agent-framework-core",)
 
 
-@pytest.mark.parametrize("installed", ["1.20.3", "1.20.0", "1.19.0", "1.20.5rc1", "not-a-version"])
+@pytest.mark.parametrize("installed", ["1.21.0", "1.20.3", "1.20.0", "1.19.0", "1.20.5rc1", "not-a-version"])
 def test_tested_older_and_unparseable_versions_are_not_untested(
     monkeypatch: pytest.MonkeyPatch, installed: str
 ) -> None:
@@ -84,14 +84,16 @@ def test_tested_older_and_unparseable_versions_are_not_untested(
 def test_log_untested_once_logs_once_per_process(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _installed(monkeypatch, agent_framework_core="1.21.0")
+    _installed(monkeypatch, agent_framework_core="1.22.0")
     monkeypatch.setattr(_framework, "_logged", False)
     with caplog.at_level(logging.WARNING, logger="agent_framework_community_postgres"):
         _framework.log_untested_once()
         _framework.log_untested_once()
     [message] = _messages(caplog)
-    assert message.startswith("community-agent-framework-postgres has not been tested with agent-framework-core 1.21.0")
-    assert "(tested: 1.20)" in message and "expected to work" in message and "agent-framework-core<1.21" in message
+    assert message.startswith("community-agent-framework-postgres has not been tested with agent-framework-core 1.22.0")
+    assert (
+        "(tested: 1.20, 1.21)" in message and "expected to work" in message and "agent-framework-core<1.22" in message
+    )
 
 
 def test_a_newer_major_is_logged_as_likely_to_break(
@@ -118,7 +120,7 @@ def test_importing_the_package_has_no_side_effect() -> None:
     script = (
         "import importlib.metadata as metadata, warnings, logging\n"
         "real = metadata.version\n"
-        "metadata.version = lambda d: '1.21.0' if d == 'agent-framework-core' else real(d)\n"
+        "metadata.version = lambda d: '1.22.0' if d == 'agent-framework-core' else real(d)\n"
         "logging.basicConfig(level=logging.WARNING)\n"
         "with warnings.catch_warnings(record=True) as caught:\n"
         "    warnings.simplefilter('error')\n"
@@ -135,7 +137,7 @@ def test_importing_the_package_has_no_side_effect() -> None:
 def test_the_first_store_logs_the_check(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     from agent_framework_community_postgres import PostgresSessionStore
 
-    _installed(monkeypatch, agent_framework_core="1.21.0")
+    _installed(monkeypatch, agent_framework_core="1.22.0")
     monkeypatch.setattr(_framework, "_logged", False)
     with caplog.at_level(logging.WARNING, logger="agent_framework_community_postgres"):
         PostgresSessionStore(application_id="a", connection_string="postgresql://u:p@127.0.0.1:1/db")
@@ -163,7 +165,7 @@ def test_a_missing_private_name_is_named_in_the_import_error(monkeypatch: pytest
         with pytest.raises(ImportError) as info:
             importlib.reload(_framework)
         assert "filter_new_messages" in str(info.value)
-        assert ">=1.20.0,<2" in str(info.value) and "tested on 1.20;" in str(info.value)
+        assert ">=1.20.0,<2" in str(info.value) and "tested on 1.20, 1.21;" in str(info.value)
     finally:
         monkeypatch.undo()
         importlib.reload(_framework)

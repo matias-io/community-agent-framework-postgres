@@ -22,7 +22,7 @@ The first release on PyPI.
 
 ### Changed
 
-- Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and `agent-framework-ag-ui` 1.5.0.
+- Requires `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. On MAF 1.19, history dedupe drops any new message that matches one already stored, so a repeated "yes" was lost. 1.20 fixed that. Tested on `agent-framework-core` 1.20.0 and 1.21.0, with `agent-framework-ag-ui` 1.5.0 and 1.5.1.
 - Owned pools set TCP keepalives and `tcp_user_timeout` unless the connection string or `pool_kwargs` sets them.
 - The migration advisory lock key is now `hashtextextended` over the schema and table prefix; it was a crc32 of the schema-qualified migrations table name.
 - Purge runs in batches of 1000 rows, one transaction per batch, and the hub purge also removes expired leases.

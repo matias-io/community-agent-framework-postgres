@@ -11,13 +11,13 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 
 | 0.1.1 | Declared | Tested |
 |---|---|---|
-| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0 |
-| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0 |
+| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0, 1.21.0 |
+| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0, 1.5.1 |
 | Python | `>=3.11` | 3.11, 3.12, 3.13, 3.14 |
 | PostgreSQL | | 16, 17 |
 | psycopg | `>=3.3.5,<4` | 3.3.6 |
 
-pip and uv refuse a MAF version outside the declared range. A newer minor inside it, such as `agent-framework-core` 1.21, installs. The first store or hub built in a process then logs one warning for each untested distribution, and a new major, which pip and uv install only when forced, is logged as outside the declared range. `compatibility()` returns the installed and tested versions for a diagnostics command. A newer minor is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and the compatibility check.
+pip and uv refuse a MAF version outside the declared range. A newer minor inside it installs. The first store or hub built in a process then logs one warning for each untested distribution, and a new major, which pip and uv install only when forced, is logged as outside the declared range. `compatibility()` returns the installed and tested versions for a diagnostics command. A newer minor is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and the compatibility check.
 
 MAF 1.19 and older are not supported. Their history dedupe drops any new message that matches one already stored, so a user who answers "yes" twice loses the second "yes". MAF 1.20 fixed that, so 1.20 is the floor.
 

@@ -4,7 +4,7 @@ Microsoft's own Cosmos DB and Redis packages import these same names from the
 same private modules. Keeping them here means an upstream rename breaks one
 file, and ``tests/unit/test_framework.py`` fails before a user notices.
 
-Verified against agent-framework-core 1.20.0 on 4 October 2026. 1.20 is the
+Verified against agent-framework-core 1.20.0 and 1.21.0 on 11 October 2026. 1.20 is the
 floor because 1.19's ``filter_new_messages`` dropped any incoming message whose
 content matched one already stored, so a repeated "yes" was lost.
 """
@@ -17,7 +17,7 @@ from importlib.metadata import PackageNotFoundError, version
 SUPPORTED_CORE = ">=1.20.0,<2"
 """The declared ``agent-framework-core`` range: MAF keeps breaking changes for major versions."""
 
-TESTED_CORE = ("1.20",)
+TESTED_CORE = ("1.20", "1.21")
 """The ``agent-framework-core`` minors this release was tested on (major.minor)."""
 
 TESTED_AG_UI = ("1.5",)
