@@ -1,9 +1,12 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
 from agent_framework import AgentSession, Message
+from psycopg import sql
 
+from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._retention import RetentionPolicy
 from agent_framework_community_postgres._session_store import PostgresSessionStore
@@ -53,7 +56,9 @@ async def test_invalid_ids_are_rejected(sessions: PostgresSessionStore) -> None:
         await sessions.set("", AgentSession())
 
 
-async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_tombstones(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     store = PostgresSessionStore(
         application_id="tests",
         client=client.client,
@@ -61,8 +66,35 @@ async def test_retention_tombstones(client: ClientHandle, migrated: TableNames) 
         retention=RetentionPolicy(ttl=timedelta(seconds=1)),
     )
     await store.set("k", AgentSession())
-    await asyncio.sleep(1.5)
+    await expire("sessions")
     assert (await store.purge()).counts == {"af_sessions": 1}
     assert await store.get("k") is None
     await store.set("k", AgentSession())
     assert await store.get("k") is not None
+
+
+async def test_corrupt_snapshot_is_loud(persistence: PostgresPersistence) -> None:
+    store = persistence.session_store()
+    await store.set("s", AgentSession(session_id="s"))
+    sessions = persistence.names.table("sessions")
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(sql.SQL("UPDATE {t} SET snapshot = '[]' WHERE session_id = 's'").format(t=sessions))
+    with pytest.raises(ValueError, match="not an object"):
+        await store.get("s")
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(
+            sql.SQL("UPDATE {t} SET snapshot = '{{}}', snapshot_version = '99' WHERE session_id = 's'").format(
+                t=sessions
+            )
+        )
+    with pytest.raises(ValueError, match="version"):
+        await store.get("s")
+
+
+async def test_two_writers_last_one_wins(persistence: PostgresPersistence) -> None:
+    store = persistence.session_store()
+    first, second = AgentSession(session_id="s"), AgentSession(session_id="s")
+    first.state["n"], second.state["n"] = 1, 2
+    await asyncio.gather(store.set("s", first), store.set("s", second))
+    loaded = await store.get("s")
+    assert loaded is not None and loaded.state["n"] in (1, 2)

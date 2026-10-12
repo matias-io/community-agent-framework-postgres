@@ -1,6 +1,9 @@
+from typing import Any
+
 import pytest
 from agent_framework import SecretString
 from agent_framework.exceptions import SettingNotFoundError
+from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
 from agent_framework_community_postgres._client import (
@@ -8,6 +11,7 @@ from agent_framework_community_postgres._client import (
     PostgresStorageError,
     TableNames,
     create_client,
+    is_retryable,
     optional_text,
     require_text,
 )
@@ -15,9 +19,9 @@ from agent_framework_community_postgres._client import (
 
 def test_table_names_render_schema_qualified_identifiers() -> None:
     names = TableNames(schema="agents", prefix="af_")
-    assert names.table("documents").as_string() == '"agents"."af_documents"'
-    assert names.index("documents_scope_idx").as_string() == '"af_documents_scope_idx"'
-    assert names.qualified("documents") == "agents.af_documents"
+    assert names.table("sessions").as_string() == '"agents"."af_sessions"'
+    assert names.index("history_messages_session_idx").as_string() == '"af_history_messages_session_idx"'
+    assert names.qualified("sessions") == "agents.af_sessions"
 
 
 @pytest.mark.parametrize("schema", ["Public", "my schema", 'x"y', "", "1abc", "public\n", "pg_custom"])
@@ -37,10 +41,13 @@ def test_table_names_reject_prefix_that_overflows_identifier_limit() -> None:
 
 
 def test_table_names_bound_the_longest_derived_index_name() -> None:
-    names = TableNames(prefix="p" * 35)
-    assert names.index("history_messages_session_idx").as_string() == f'"{"p" * 35}history_messages_session_idx"'
+    names = TableNames(prefix="p" * 28)
+    assert (
+        names.index("history_messages_session_expiry_idx").as_string()
+        == f'"{"p" * 28}history_messages_session_expiry_idx"'
+    )
     with pytest.raises(ValueError):
-        TableNames(prefix="p" * 36)
+        TableNames(prefix="p" * 29)
 
 
 def test_empty_prefix_is_allowed() -> None:
@@ -151,3 +158,121 @@ def test_invalid_conninfo_is_reported_without_echoing_it() -> None:
         ClientHandle(SecretString("garbage SECRETPW"), None)
     assert "SECRETPW" not in str(info.value)
     assert info.value.__cause__ is None
+
+
+def test_retryable_sqlstates() -> None:
+    assert is_retryable("08006")  # connection failure
+    assert is_retryable("40001")  # serialization failure
+    assert is_retryable("40P01")  # deadlock
+    assert is_retryable("53300")  # too many connections
+    assert is_retryable("57P01")  # admin shutdown
+    assert is_retryable("55P03")  # lock not available
+    assert not is_retryable("42P01")  # undefined table
+    assert not is_retryable("23505")  # unique violation
+    assert not is_retryable(None)
+
+
+def test_storage_error_carries_classification() -> None:
+    error = PostgresStorageError("x", sqlstate="40001", retryable=True)
+    assert error.sqlstate == "40001" and error.retryable is True
+    assert PostgresStorageError("x").retryable is False and PostgresStorageError("x").sqlstate is None
+
+
+def test_owned_pool_connection_defaults() -> None:
+    handle = ClientHandle(SecretString("postgresql://u:p@127.0.0.1:5433/db"), None)
+    assert isinstance(handle.client, AsyncConnectionPool)
+    kwargs = handle.client.kwargs
+    assert kwargs["connect_timeout"] == 10
+    assert kwargs["keepalives"] == 1
+    assert kwargs["tcp_user_timeout"] == 30000
+    assert "options" not in kwargs
+    assert handle.client.max_size == 10
+
+
+def test_conninfo_values_win_over_defaults() -> None:
+    handle = ClientHandle(SecretString("postgresql://u:p@127.0.0.1:5433/db?connect_timeout=3&keepalives=0"), None)
+    assert isinstance(handle.client, AsyncConnectionPool)
+    assert "connect_timeout" not in handle.client.kwargs
+    assert "keepalives" not in handle.client.kwargs
+
+
+def test_pool_kwargs_override_pool_and_connection_defaults() -> None:
+    handle = ClientHandle(
+        SecretString("postgresql://u:p@127.0.0.1:5433/db"),
+        None,
+        pool_kwargs={"max_size": 50, "kwargs": {"prepare_threshold": None}},
+    )
+    assert isinstance(handle.client, AsyncConnectionPool)
+    assert handle.client.max_size == 50
+    assert handle.client.kwargs["prepare_threshold"] is None
+    assert handle.client.kwargs["keepalives"] == 1
+
+
+class _Credential:
+    def get_token(self, *scopes: str) -> None:
+        raise AssertionError("not called")
+
+
+def test_pool_kwargs_cannot_replace_the_entra_connection_class() -> None:
+    with pytest.raises(ValueError, match="connection_class"):
+        ClientHandle(
+            SecretString("postgresql://u:p@127.0.0.1:5433/db"),
+            None,
+            credential=_Credential(),  # type: ignore[arg-type]
+            pool_kwargs={"connection_class": AsyncConnection},
+        )
+
+
+def test_weak_sslmode_is_refused_with_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    for mode in ("disable", "allow", "prefer"):
+        with pytest.raises(ValueError, match=f"sslmode={mode}"):
+            ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_Credential())  # type: ignore[arg-type]
+    monkeypatch.setenv("PGSSLMODE", "prefer")
+    with pytest.raises(ValueError, match="PGSSLMODE"):
+        ClientHandle(SecretString("postgresql://u@h/db"), None, credential=_Credential())  # type: ignore[arg-type]
+    monkeypatch.delenv("PGSSLMODE")
+    ClientHandle(SecretString("postgresql://u@h/db?sslmode=require"), None, credential=_Credential())  # type: ignore[arg-type]
+    ClientHandle(SecretString("postgresql://u@h/db?sslmode=prefer"), None)  # no credential: the user's choice
+
+
+def test_the_sslmode_libpq_would_use_is_the_one_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PGSSLMODE", "prefer")
+    ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_Credential())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="sslmode=disable"):
+        ClientHandle(
+            SecretString("postgresql://u@h/db?sslmode=verify-full"),
+            None,
+            credential=_Credential(),  # type: ignore[arg-type]
+            pool_kwargs={"kwargs": {"sslmode": "disable"}},
+        )
+
+
+def test_pool_kwargs_cannot_configure_a_borrowed_client() -> None:
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool("host=127.0.0.1", open=False)
+    with pytest.raises(ValueError, match="pool_kwargs"):
+        create_client(None, client=pool, env_file_path=None, env_file_encoding=None, pool_kwargs={"max_size": 2})
+    with pytest.raises(ValueError, match="pool_kwargs"):
+        ClientHandle(None, pool, pool_kwargs={"max_size": 2})
+
+
+async def test_stores_and_the_hub_take_pool_kwargs() -> None:
+    from agent_framework_community_postgres import (
+        PostgresCheckpointStorage,
+        PostgresHistoryProvider,
+        PostgresLeases,
+        PostgresPersistence,
+        PostgresSessionStore,
+    )
+
+    dsn = "host=127.0.0.1 dbname=x"
+    for store_type in (PostgresHistoryProvider, PostgresSessionStore, PostgresCheckpointStorage, PostgresLeases):
+        store = store_type(application_id="tests", connection_string=dsn, pool_kwargs={"max_size": 3})
+        pool = store._client.client  # pyright: ignore[reportPrivateUsage]
+        assert isinstance(pool, AsyncConnectionPool) and pool.max_size == 3
+        await store.close()
+    hub = PostgresPersistence(application_id="tests", connection_string=dsn, pool_kwargs={"max_size": 4})
+    assert isinstance(hub.pool, AsyncConnectionPool) and hub.pool.max_size == 4
+    with pytest.raises(TypeError, match="pool_kwargs is set by the hub"):
+        hub.session_store(pool_kwargs={"max_size": 5})
+    await hub.close()

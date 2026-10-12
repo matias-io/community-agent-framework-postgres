@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Self
 
 from agent_framework import SecretString
@@ -9,11 +11,11 @@ from psycopg import sql
 
 from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
-from ._document_store import PostgresDocumentStore
 from ._entra import EntraCredential
-from ._history_provider import PostgresHistoryProvider
+from ._framework import log_untested_once
+from ._history_provider import PostgresHistoryProvider, whole_session_expired
 from ._leases import PostgresLeases
-from ._migrations import MigrationReport, migrate, pending_versions
+from ._migrations import LOCK_TIMEOUT, MigrationReport, current_version, migrate, pending_versions
 from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
 from ._session_store import PostgresSessionStore
 
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
 
 # Another application id, schema or prefix would escape the hub's migrations or purge; another client
 # or credential would escape its pool and its close.
-_HUB_OWNED = ("application_id", "client", "credential", "schema", "table_prefix")
+_HUB_OWNED = ("application_id", "client", "credential", "pool_kwargs", "schema", "table_prefix")
 
 
 class PostgresPersistence:
@@ -46,7 +48,9 @@ class PostgresPersistence:
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
+        log_untested_once()
         self.application_id = require_text(application_id, "application_id")
         self.names = TableNames(schema=schema, prefix=table_prefix)
         self.retention = retention or RetentionPolicy()
@@ -56,6 +60,7 @@ class PostgresPersistence:
             env_file_path=env_file_path,
             env_file_encoding=env_file_encoding,
             credential=credential,
+            pool_kwargs=pool_kwargs,
         )
 
     @property
@@ -78,13 +83,17 @@ class PostgresPersistence:
     async def __aexit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         await self.close()
 
-    async def migrate(self) -> MigrationReport:
-        """Create or upgrade the schema."""
-        return await migrate(self._client, self.names)
+    async def migrate(self, *, lock_timeout: timedelta = LOCK_TIMEOUT) -> MigrationReport:
+        """Create or upgrade the schema; each version's DDL gives up after ``lock_timeout`` waiting on a lock."""
+        return await migrate(self._client, self.names, lock_timeout=lock_timeout)
 
     async def pending_migrations(self) -> list[int]:
         """Versions ``migrate`` would apply."""
         return await pending_versions(self._client, self.names)
+
+    async def current_version(self) -> int:
+        """The schema version the database is at; 0 before the first migration."""
+        return await current_version(self._client, self.names)
 
     def _common(self, overrides: dict[str, Any]) -> dict[str, Any]:
         for key in _HUB_OWNED:
@@ -110,11 +119,16 @@ class PostgresPersistence:
         return PostgresSessionStore(**self._common(kwargs))
 
     def checkpoint_storage(
-        self, *, scope: str | None = None, allowed_checkpoint_types: list[str] | None = None, **kwargs: Any
+        self,
+        *,
+        tenant_id: str | None = None,
+        scope: str | None = None,
+        allowed_checkpoint_types: list[str] | None = None,
+        **kwargs: Any,
     ) -> PostgresCheckpointStorage:
-        """A checkpoint storage on the shared pool, optionally scoped to one conversation."""
+        """A checkpoint storage on the shared pool, optionally scoped to one tenant and one conversation."""
         return PostgresCheckpointStorage(
-            scope=scope, allowed_checkpoint_types=allowed_checkpoint_types, **self._common(kwargs)
+            tenant_id=tenant_id, scope=scope, allowed_checkpoint_types=allowed_checkpoint_types, **self._common(kwargs)
         )
 
     def thread_snapshot_store(self, **kwargs: Any) -> PostgresAGUIThreadSnapshotStore:
@@ -122,10 +136,6 @@ class PostgresPersistence:
         from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
         return PostgresAGUIThreadSnapshotStore(**self._common(kwargs))
-
-    def document_store(self, *, collection: str, **kwargs: Any) -> PostgresDocumentStore:
-        """A document store for one collection on the shared pool."""
-        return PostgresDocumentStore(collection=collection, **self._common(kwargs))
 
     def leases(self) -> PostgresLeases:
         """The lease table on the shared pool."""
@@ -141,33 +151,34 @@ class PostgresPersistence:
 
         A row is expired when its ``expires_at``, stamped by whichever policy wrote it, has
         passed; the hub needs no policy of its own. ``mode`` defaults to the hub policy's mode.
-        Each table is purged in its own transaction.
+        Each table is purged in batches, one transaction per batch. A history session is purged
+        only once every one of its messages has expired.
         """
         chosen = RetentionPolicy(mode=mode).mode if mode is not None else self.retention.mode
         where = sql.SQL("application_id = %(app)s")
         params = {"app": self.application_id}
-        plan: list[tuple[str, sql.Composable | None, bool]] = [
-            ("history_messages", None, False),
-            ("sessions", sql.SQL("snapshot = NULL"), True),
-            ("checkpoints", None, False),
+        plan: list[tuple[str, sql.Composable, sql.Composable | None, bool]] = [
+            ("history_messages", whole_session_expired(self.names.table("history_messages")), None, False),
+            ("sessions", where, sql.SQL("snapshot = NULL"), True),
+            ("checkpoints", where, None, False),
             (
                 "thread_snapshots",
+                where,
                 sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
                 True,
             ),
-            ("documents", sql.SQL("payload = NULL"), True),
+            ("leases", where, None, False),
         ]
         counts: dict[str, int] = {}
-        # One transaction per table: row locks are never held across tables, so a long purge cannot
+        # One transaction per batch: row locks are never held across tables, so a long purge cannot
         # deadlock with, say, a history trim on the same session.
-        for table, tombstone, tombstone_allowed in plan:
-            async with self._client.connection() as connection:
-                counts[f"{self.names.prefix}{table}"] = await purge_rows(
-                    connection,
-                    table=self.names.table(table),
-                    where=where,
-                    params=params,
-                    mode=chosen if tombstone_allowed else "delete",
-                    tombstone=tombstone,
-                )
+        for table, table_where, tombstone, tombstone_allowed in plan:
+            counts[f"{self.names.prefix}{table}"] = await purge_rows(
+                self._client,
+                table=self.names.table(table),
+                where=table_where,
+                params=params,
+                mode=chosen if tombstone_allowed else "delete",
+                tombstone=tombstone,
+            )
         return PurgeReport(counts)

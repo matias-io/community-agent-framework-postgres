@@ -40,6 +40,4 @@ jobs:
       - run: uv pip install --upgrade agent-framework-core agent-framework-ag-ui
       - run: uv pip show agent-framework-core agent-framework-ag-ui
       - run: uv run --no-sync python -c "import sys; print(sys.version)"
-      # A MAF minor newer than the tested ones makes the package warn at import, and filterwarnings = error
-      # would turn that into a failure; the canary exists to run exactly those versions.
-      - run: uv run --no-sync pytest -v -W "ignore:community-agent-framework-postgres has not been tested"
+      - run: uv run --no-sync pytest -v

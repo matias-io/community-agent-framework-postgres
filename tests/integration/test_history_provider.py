@@ -1,13 +1,16 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from agent_framework import Message
-from psycopg import sql
+from psycopg import AsyncConnection, sql
 from psycopg.types.json import Jsonb
+from psycopg_pool import AsyncConnectionPool
 
-from agent_framework_community_postgres import _framework
-from agent_framework_community_postgres._client import ClientHandle, TableNames
+from agent_framework_community_postgres import PostgresPersistence, _framework
+from agent_framework_community_postgres._client import ClientHandle, PostgresStorageError, TableNames
 from agent_framework_community_postgres._history_provider import PostgresHistoryProvider
 from agent_framework_community_postgres._retention import RetentionPolicy
 
@@ -55,22 +58,20 @@ async def test_undecodable_rows_are_skipped(
             ["tests", history.source_id, "s", Jsonb({"type": "message", "role": "user", "contents": 5})],
         )
     assert _texts(await history.get_messages("s")) == ["good"]
-    await history.save_messages("s", [Message(role="assistant", contents=["reply"])])
-    assert _texts(await history.get_messages("s")) == ["good", "reply"]
 
 
-async def test_replay_rule_is_the_installed_maf_rule(history: PostgresHistoryProvider) -> None:
-    # MAF 1.20 keeps a repeated id-less input that 1.19 dropped as a replay; the provider follows the installed rule.
+async def test_a_repeated_input_is_kept_not_dropped_as_a_replay(history: PostgresHistoryProvider) -> None:
+    # The MAF 1.20 rule: a repeated id-less input is a new message. 1.19 dropped it, which is why 1.20 is the floor.
     def stored() -> list[Message]:
         return [Message(role="user", contents=["good"])]
 
     def incoming() -> list[Message]:
         return [Message(role="user", contents=["good"]), Message(role="user", contents=["next"])]
 
-    expected = _texts(stored() + _framework.filter_new_messages(stored(), incoming()))
+    assert _texts(_framework.filter_new_messages(stored(), incoming())) == ["good", "next"]
     await history.save_messages("s", stored())
     await history.save_messages("s", incoming())
-    assert _texts(await history.get_messages("s")) == expected
+    assert _texts(await history.get_messages("s")) == ["good", "good", "next"]
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:
@@ -108,7 +109,9 @@ async def test_clear_and_list_sessions(history: PostgresHistoryProvider) -> None
     assert await history.list_sessions() == ["s2"]
 
 
-async def test_retention_deletes_expired_messages(client: ClientHandle, migrated: TableNames) -> None:
+async def test_retention_deletes_expired_messages(
+    client: ClientHandle, migrated: TableNames, expire: Callable[[str], Awaitable[None]]
+) -> None:
     """History has no tombstone form: expired messages are deleted whatever the policy's mode."""
     history = PostgresHistoryProvider(
         application_id="tests",
@@ -117,6 +120,66 @@ async def test_retention_deletes_expired_messages(client: ClientHandle, migrated
         retention=RetentionPolicy(ttl=timedelta(seconds=1), mode="tombstone"),
     )
     await history.save_messages("s", [Message(role="user", contents=["a"])])
-    await asyncio.sleep(1.5)
+    await expire("history_messages")
     assert (await history.purge()).counts == {"af_history_messages": 1}
     assert await history.get_messages("s") == []
+
+
+async def test_concurrent_saves_under_repeatable_read(test_dsn: str, schema: str) -> None:
+    async def repeatable_read(connection: AsyncConnection[Any]) -> None:
+        await connection.execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+
+    pool = AsyncConnectionPool(test_dsn, open=False, kwargs={"autocommit": True}, configure=repeatable_read)
+    async with pool, PostgresPersistence(application_id="tests", client=pool, schema=schema) as hub:
+        await hub.migrate()
+        provider = hub.history_provider()
+        transcript = [Message(role="user", contents=["hi"]), Message(role="assistant", contents=["hello"])]
+        await asyncio.gather(*(provider.save_messages("s", transcript) for _ in range(6)))
+        assert [m.text for m in await provider.get_messages("s")] == ["hi", "hello"]
+
+
+async def test_save_reads_only_a_tail(persistence: PostgresPersistence, monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = persistence.history_provider()
+    await provider.save_messages("s", [Message(role="user", contents=[str(i)]) for i in range(50)])
+    limits: list[int] = []
+    original = provider._tail  # noqa: SLF001
+
+    async def counting(connection: AsyncConnection[Any], params: dict[str, Any], limit: int) -> list[Message]:
+        limits.append(limit)
+        return await original(connection, params, limit)
+
+    monkeypatch.setattr(provider, "_tail", counting)
+    await provider.save_messages(
+        "s", [Message(role="user", contents=["50"]), Message(role="assistant", contents=["51"])]
+    )
+    assert limits == [2]
+    assert len(await provider.get_messages("s")) == 52
+
+
+async def test_undecodable_row_in_the_window_fails_the_save(persistence: PostgresPersistence) -> None:
+    provider = persistence.history_provider()
+    await provider.save_messages("s", [Message(role="user", contents=["a"])])
+    async with persistence._client.connection() as connection:  # noqa: SLF001
+        await connection.execute(
+            sql.SQL("UPDATE {h} SET message = '[]' WHERE session_id = 's'").format(
+                h=persistence.names.table("history_messages")
+            )
+        )
+    with pytest.raises(PostgresStorageError):
+        await provider.save_messages("s", [Message(role="user", contents=["b"])])
+
+
+async def test_clear_is_serialized_with_saves(persistence: PostgresPersistence) -> None:
+    provider = persistence.history_provider()
+    big = [Message(role="user", contents=[str(i)]) for i in range(200)]
+    results = await asyncio.gather(provider.save_messages("s", big), provider.clear("s"), return_exceptions=True)
+    assert all(r is None for r in results)
+    assert len(await provider.get_messages("s")) in (0, 200)
+
+
+async def test_list_sessions_pages(persistence: PostgresPersistence) -> None:
+    provider = persistence.history_provider()
+    for name in ("a", "b", "c"):
+        await provider.save_messages(name, [Message(role="user", contents=["x"])])
+    assert await provider.list_sessions(limit=2) == ["a", "b"]
+    assert await provider.list_sessions(limit=2, after="b") == ["c"]

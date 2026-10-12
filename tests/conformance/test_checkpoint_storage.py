@@ -31,19 +31,17 @@ def storage(request: pytest.FixtureRequest) -> Any:
     return PostgresCheckpointStorage(application_id="conformance", client=client.client, schema=names.schema)
 
 
-async def test_get_latest_picks_the_newest_timestamp(storage: Any) -> None:
+async def test_get_latest_picks_the_last_saved_when_clocks_agree(storage: Any) -> None:
+    # InMemoryCheckpointStorage picks the newest timestamp, PostgreSQL the last write; on one clock
+    # they agree. The write-order case with a clock that runs behind is in the integration tests.
     base = datetime(2026, 9, 30, tzinfo=UTC)
     first = _checkpoint(base)
     second = _checkpoint(base + timedelta(seconds=1), previous=first.checkpoint_id)
-    await storage.save(second)
     await storage.save(first)
+    await storage.save(second)
     latest = await storage.get_latest(workflow_name="wf")
     assert latest is not None and latest.checkpoint_id == second.checkpoint_id
-    # The protocol leaves listing order open (InMemoryCheckpointStorage lists in insertion order);
-    # PostgreSQL's oldest-first order is asserted in the integration tests.
-    assert sorted(await storage.list_checkpoint_ids(workflow_name="wf")) == sorted(
-        [first.checkpoint_id, second.checkpoint_id]
-    )
+    assert await storage.list_checkpoint_ids(workflow_name="wf") == [first.checkpoint_id, second.checkpoint_id]
 
 
 async def test_missing_load_raises_and_delete_reports(storage: Any) -> None:

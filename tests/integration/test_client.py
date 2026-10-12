@@ -2,12 +2,13 @@ import asyncio
 import time
 
 import pytest
-from agent_framework import SecretString
+from agent_framework import AgentSession, SecretString
 from psycopg import AsyncConnection, sql
 from psycopg.errors import UndefinedTable
+from psycopg.pq import TransactionStatus
 from psycopg_pool import AsyncConnectionPool, PoolClosed
 
-from agent_framework_community_postgres import PostgresDocumentStore, PostgresPersistence
+from agent_framework_community_postgres import PostgresPersistence, PostgresSessionStore
 from agent_framework_community_postgres._client import ClientHandle, PostgresStorageError
 
 pytestmark = pytest.mark.integration
@@ -56,6 +57,7 @@ async def test_closed_borrowed_pool_raises_storage_error(test_dsn: str) -> None:
         async with ClientHandle(None, pool).connection():
             pass
     assert isinstance(info.value.__cause__, PoolClosed)
+    assert info.value.retryable is False
 
 
 async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None:
@@ -124,14 +126,11 @@ async def test_concurrent_calls_over_one_borrowed_connection_are_serialized(test
         PostgresPersistence(application_id="tests", client=connection, schema=schema) as hub,
     ):
         await hub.migrate()
-        separate = PostgresDocumentStore(application_id="tests", collection="threads", client=connection, schema=schema)
-        stores = [hub.document_store(collection="threads"), separate]
-        results = await asyncio.gather(
-            *(stores[n % 2].put(scope="s", key=f"k{n}", payload={"n": n}) for n in range(10))
-        )
-        assert results == [1] * 10
+        separate = PostgresSessionStore(application_id="tests", client=connection, schema=schema)
+        stores = [hub.session_store(), separate]
+        await asyncio.gather(*(stores[n % 2].set(f"s{n}", AgentSession()) for n in range(10)))
     async with await AsyncConnection.connect(test_dsn, autocommit=True) as other:
-        cursor = await other.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_documents")))
+        cursor = await other.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_sessions")))
         assert await cursor.fetchone() == (10,)
 
 
@@ -145,5 +144,41 @@ async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) 
                 async with ClientHandle(None, pool).connection():
                     pass
         assert str(info.value) == _CLEAR.replace("10 seconds", "2 seconds")
+        assert info.value.retryable is True
     finally:
         await pool.close()
+
+
+async def test_driver_errors_carry_sqlstate(persistence: PostgresPersistence) -> None:
+    with pytest.raises(PostgresStorageError) as info:
+        async with persistence._client.connection() as connection:
+            await connection.execute("SELECT * FROM no_such_table_here")
+    assert info.value.sqlstate == "42P01"
+    assert info.value.retryable is False
+
+
+async def test_a_non_transactional_read_runs_in_autocommit(persistence: PostgresPersistence) -> None:
+    async with persistence._client.connection(transactional=False) as connection:
+        assert connection.autocommit is True
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        cursor = await connection.execute("SELECT txid_current_if_assigned()")
+        assert await cursor.fetchone() == (None,)
+
+
+async def test_a_read_on_a_borrowed_non_autocommit_connection_leaves_no_transaction_open(
+    test_dsn: str, schema: str
+) -> None:
+    async with await AsyncConnection.connect(test_dsn) as connection:
+        assert connection.autocommit is False
+        hub = PostgresPersistence(application_id="tests", client=connection, schema=schema)
+        await hub.migrate()
+        store = hub.session_store()
+        assert await store.get("s") is None
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        await store.set("s", AgentSession())
+        assert connection.info.transaction_status == TransactionStatus.IDLE
+        async with await AsyncConnection.connect(test_dsn, autocommit=True) as other:
+            cursor = await other.execute(
+                sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_sessions"))
+            )
+            assert await cursor.fetchone() == (1,)

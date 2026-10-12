@@ -14,11 +14,10 @@ def test_readme_names_every_public_store() -> None:
         "PostgresSessionStore",
         "PostgresCheckpointStorage",
         "PostgresAGUIThreadSnapshotStore",
-        "PostgresDocumentStore",
         "RetentionPolicy",
     ):
         assert name in readme, name
-    assert "agent-framework-core" in readme and "1.19" in readme
+    assert "agent-framework-core" in readme and "1.20" in readme
 
 
 def test_docs_pages_exist_and_are_linked_from_readme() -> None:
@@ -28,7 +27,7 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
         "sessions",
         "checkpoints",
         "thread-snapshots",
-        "documents-and-leases",
+        "leases",
         "retention",
         "migrations",
         "compatibility",
@@ -40,7 +39,8 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
 
 def test_changelog_has_the_first_release() -> None:
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "## [Unreleased]" in changelog or "## [0.1.0]" in changelog
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert re.search(rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", changelog, flags=re.MULTILINE)
 
 
 def _markdown_links(text: str) -> list[str]:
@@ -75,3 +75,8 @@ def test_readme_anchors_name_headings() -> None:
     for link in _markdown_links(readme):
         if link.startswith("#"):
             assert link[1:] in slugs, link
+
+
+def test_package_description_does_not_promise_documents() -> None:
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert "document" not in project["description"]

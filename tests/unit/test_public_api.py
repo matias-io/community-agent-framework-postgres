@@ -10,9 +10,6 @@ def test_public_names_are_exported() -> None:
         "PostgresSessionStore",
         "PostgresCheckpointStorage",
         "PostgresAGUIThreadSnapshotStore",
-        "PostgresDocumentStore",
-        "Document",
-        "DocumentSummary",
         "PostgresLeases",
         "Lease",
         "RetentionPolicy",
@@ -21,7 +18,6 @@ def test_public_names_are_exported() -> None:
         "PostgresSettings",
         "TableNames",
         "PostgresStorageError",
-        "RevisionConflict",
         "LeaseUnavailable",
         "LeaseLost",
         "MIGRATIONS",
@@ -29,7 +25,8 @@ def test_public_names_are_exported() -> None:
         "__version__",
         "EntraCredential",
         "ENTRA_SCOPE",
-        "UntestedAgentFrameworkWarning",
+        "Compatibility",
+        "compatibility",
     }
     assert expected <= set(package.__all__)
     assert package.PostgresAGUIThreadSnapshotStore.__name__ == "PostgresAGUIThreadSnapshotStore"

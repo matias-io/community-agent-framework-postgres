@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
-import zlib
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 
 from psycopg import sql
 
 from ._client import ClientHandle, PostgresStorageError, TableNames
 
 Migration = Callable[[TableNames], Sequence[sql.Composed]]
+
+LOCK_TIMEOUT = timedelta(seconds=30)
+
+
+def _lock_timeout_literal(lock_timeout: timedelta) -> sql.Literal:
+    milliseconds = lock_timeout // timedelta(milliseconds=1)
+    if milliseconds < 1:
+        # PostgreSQL reads a lock_timeout of 0 as "wait forever", the opposite of what a caller means.
+        raise ValueError("lock_timeout must be at least one millisecond.")
+    return sql.Literal(f"{milliseconds}ms")
 
 
 def _v1(names: TableNames) -> list[sql.Composed]:
@@ -32,6 +43,10 @@ def _v1(names: TableNames) -> list[sql.Composed]:
         sql.SQL(
             "CREATE INDEX {idx} ON {history} (application_id, tenant_id, agent_id, source_id, session_id, id)"
         ).format(idx=i("history_messages_session_idx"), history=t("history_messages")),
+        # Serves the purge's per-session "is any row still live" probe.
+        sql.SQL(
+            "CREATE INDEX {idx} ON {history} (application_id, tenant_id, agent_id, source_id, session_id, expires_at)"
+        ).format(idx=i("history_messages_session_expiry_idx"), history=t("history_messages")),
         sql.SQL("CREATE INDEX {idx} ON {history} (expires_at) WHERE expires_at IS NOT NULL").format(
             idx=i("history_messages_expires_idx"), history=t("history_messages")
         ),
@@ -41,31 +56,38 @@ def _v1(names: TableNames) -> list[sql.Composed]:
             " session_id text NOT NULL,"
             " snapshot jsonb,"
             " snapshot_version text NOT NULL,"
-            " revision bigint NOT NULL DEFAULT 1,"
             " created_at timestamptz NOT NULL DEFAULT now(),"
             " updated_at timestamptz NOT NULL DEFAULT now(),"
             " expires_at timestamptz,"
             " purged_at timestamptz,"
             " PRIMARY KEY (application_id, session_id))"
         ).format(sessions=t("sessions")),
+        sql.SQL("CREATE INDEX {idx} ON {sessions} (expires_at) WHERE expires_at IS NOT NULL").format(
+            idx=i("sessions_expires_idx"), sessions=t("sessions")
+        ),
+        # "Latest" is write order within a scope (sequence), not the producer's clock; see docs/checkpoints.md.
         sql.SQL(
             "CREATE TABLE {checkpoints} ("
             " application_id text NOT NULL,"
+            " tenant_id text NOT NULL DEFAULT '',"
             " scope text NOT NULL DEFAULT '',"
+            " payload_format text NOT NULL DEFAULT 'agent-framework.python.checkpoint.v1',"
             " workflow_name text NOT NULL,"
             " checkpoint_id text NOT NULL,"
             " previous_checkpoint_id text,"
             " checkpoint_timestamp timestamptz NOT NULL,"
-            " iteration_count integer NOT NULL,"
-            " encoded jsonb NOT NULL,"
+            " sequence bigint GENERATED ALWAYS AS IDENTITY,"
+            " payload jsonb NOT NULL,"
             " created_at timestamptz NOT NULL DEFAULT now(),"
             " expires_at timestamptz,"
-            " PRIMARY KEY (application_id, scope, checkpoint_id))"
+            " PRIMARY KEY (application_id, tenant_id, scope, checkpoint_id))"
         ).format(checkpoints=t("checkpoints")),
         sql.SQL(
-            "CREATE INDEX {idx} ON {checkpoints}"
-            " (application_id, scope, workflow_name, checkpoint_timestamp, created_at)"
-        ).format(idx=i("checkpoints_workflow_idx"), checkpoints=t("checkpoints")),
+            "CREATE INDEX {idx} ON {checkpoints} (application_id, tenant_id, scope, workflow_name, sequence)"
+        ).format(idx=i("checkpoints_scope_idx"), checkpoints=t("checkpoints")),
+        sql.SQL("CREATE INDEX {idx} ON {checkpoints} (expires_at) WHERE expires_at IS NOT NULL").format(
+            idx=i("checkpoints_expires_idx"), checkpoints=t("checkpoints")
+        ),
         sql.SQL(
             "CREATE TABLE {snapshots} ("
             " application_id text NOT NULL,"
@@ -75,30 +97,14 @@ def _v1(names: TableNames) -> list[sql.Composed]:
             " state jsonb,"
             " interrupt jsonb,"
             " session_state jsonb,"
-            " revision bigint NOT NULL DEFAULT 1,"
             " created_at timestamptz NOT NULL DEFAULT now(),"
             " updated_at timestamptz NOT NULL DEFAULT now(),"
             " expires_at timestamptz,"
             " purged_at timestamptz,"
             " PRIMARY KEY (application_id, scope, thread_id))"
         ).format(snapshots=t("thread_snapshots")),
-        sql.SQL(
-            "CREATE TABLE {documents} ("
-            " application_id text NOT NULL,"
-            " collection text NOT NULL,"
-            " scope text NOT NULL,"
-            " key text NOT NULL,"
-            " payload jsonb,"
-            " metadata jsonb NOT NULL DEFAULT '{{}}'::jsonb,"
-            " revision bigint NOT NULL DEFAULT 1,"
-            " created_at timestamptz NOT NULL DEFAULT now(),"
-            " updated_at timestamptz NOT NULL DEFAULT now(),"
-            " expires_at timestamptz,"
-            " purged_at timestamptz,"
-            " PRIMARY KEY (application_id, collection, scope, key))"
-        ).format(documents=t("documents")),
-        sql.SQL("CREATE INDEX {idx} ON {documents} (application_id, collection, scope, updated_at DESC)").format(
-            idx=i("documents_scope_idx"), documents=t("documents")
+        sql.SQL("CREATE INDEX {idx} ON {snapshots} (expires_at) WHERE expires_at IS NOT NULL").format(
+            idx=i("thread_snapshots_expires_idx"), snapshots=t("thread_snapshots")
         ),
         sql.SQL(
             "CREATE TABLE {leases} ("
@@ -109,6 +115,7 @@ def _v1(names: TableNames) -> list[sql.Composed]:
             " expires_at timestamptz NOT NULL,"
             " PRIMARY KEY (application_id, resource))"
         ).format(leases=t("leases")),
+        sql.SQL("CREATE INDEX {idx} ON {leases} (expires_at)").format(idx=i("leases_expires_idx"), leases=t("leases")),
     ]
 
 
@@ -134,17 +141,20 @@ def _version_table(names: TableNames) -> sql.Composed:
 def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
     """The SQL ``migrate`` would run, as text, for review or manual application by a DBA.
 
-    Each version is one transaction (``BEGIN;`` ... ``COMMIT;``), as in ``migrate``.
+    Each version is one transaction (``BEGIN;`` ... ``COMMIT;``) under ``migrate``'s default
+    ``lock_timeout``, as in ``migrate``. No versions render as an empty string.
     """
     chosen = list(range(1, len(MIGRATIONS) + 1)) if versions is None else list(versions)
     if any(not 1 <= version <= len(MIGRATIONS) for version in chosen):
         raise ValueError(f"versions must be between 1 and {len(MIGRATIONS)}.")
-    parts: list[str] = []
-    if chosen:
-        parts.append(_version_table(names).as_string() + ";")
+    if not chosen:
+        return ""
+    timeout = sql.SQL("SET LOCAL lock_timeout = {}").format(_lock_timeout_literal(LOCK_TIMEOUT)).as_string()
+    parts = [_version_table(names).as_string() + ";"]
     for version in chosen:
         parts.append(f"-- version {version}")
         parts.append("BEGIN;")
+        parts.append(timeout + ";")
         parts.extend(statement.as_string() + ";" for statement in MIGRATIONS[version - 1](names))
         parts.append(
             sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})")  # noqa: S608
@@ -153,12 +163,12 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
             + ";"
         )
         parts.append("COMMIT;")
-    return "\n".join(parts) + ("\n" if parts else "")
+    return "\n".join(parts) + "\n"
 
 
 async def current_version(client: ClientHandle, names: TableNames) -> int:
     """The highest applied version, or 0 when nothing has been applied."""
-    async with client.connection() as connection:
+    async with client.connection(transactional=False) as connection:
         cursor = await connection.execute("SELECT to_regclass(%s)", (names.qualified("migrations"),))
         found = await cursor.fetchone()
         if found is None or found[0] is None:
@@ -186,24 +196,35 @@ async def pending_versions(client: ClientHandle, names: TableNames) -> list[int]
     return list(range(current + 1, len(MIGRATIONS) + 1))
 
 
-async def migrate(client: ClientHandle, names: TableNames) -> MigrationReport:
-    """Apply every pending migration, one transaction each, serialized across processes by an advisory lock."""
-    # A crc32 collision between two schemas' keys only makes their migrations wait for each other.
-    lock_key = zlib.crc32(names.qualified("migrations").encode("utf-8"))
+async def migrate(
+    client: ClientHandle, names: TableNames, *, lock_timeout: timedelta = LOCK_TIMEOUT
+) -> MigrationReport:
+    """Apply every pending migration, one transaction each, serialized across processes by an advisory lock.
+
+    A version's DDL runs under ``lock_timeout`` (``SET LOCAL``, after the migration lock is held), so a
+    migration never queues indefinitely behind application traffic; a timeout raises a retryable
+    ``PostgresStorageError`` and a rerun resumes. Replicas waiting for another replica's migration
+    wait on the advisory lock without a timeout.
+    """
+    lock_key = json.dumps(["agent-framework-postgres:migrations", names.schema, names.prefix])
+    timeout = _lock_timeout_literal(lock_timeout)
     applied: list[int] = []
-    async with client.connection() as connection:
+    # READ COMMITTED in both blocks: a statement after the lock must see what another replica committed while
+    # this one waited, which a REPEATABLE READ snapshot taken by the lock statement itself would hide.
+    async with client.connection(read_committed=True) as connection:
         # The lock also covers the CREATE TABLE IF NOT EXISTS, which races on pg_type when two processes start fresh.
-        await connection.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+        await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
         await connection.execute(_version_table(names))
     for version in await pending_versions(client, names):
-        async with client.connection() as connection:
-            await connection.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
+        async with client.connection(read_committed=True) as connection:
+            await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
             cursor = await connection.execute(
                 sql.SQL("SELECT 1 FROM {migrations} WHERE version = %s").format(migrations=names.table("migrations")),
                 (version,),
             )
             if await cursor.fetchone() is not None:
                 continue  # another process applied it while we waited for the lock
+            await connection.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(timeout))
             for statement in MIGRATIONS[version - 1](names):
                 await connection.execute(statement)
             await connection.execute(

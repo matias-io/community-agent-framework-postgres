@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 from agent_framework import SecretString
 from psycopg import sql
@@ -16,7 +17,7 @@ from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
 try:
-    from agent_framework_ag_ui import AGUIThreadSnapshot
+    from agent_framework_ag_ui import AGUIThreadSnapshot, AGUIThreadSnapshotStore, SnapshotScope
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
     raise ImportError(
         "PostgresAGUIThreadSnapshotStore needs agent-framework-ag-ui. "
@@ -44,6 +45,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             application_id=application_id,
@@ -55,6 +57,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
 
     def _params(self, scope: str, thread_id: str) -> dict[str, Any]:
@@ -87,7 +90,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
                     " %(session_state)s, {expires})"
                     " ON CONFLICT (application_id, scope, thread_id) DO UPDATE SET"
                     " messages = EXCLUDED.messages, state = EXCLUDED.state, interrupt = EXCLUDED.interrupt,"
-                    " session_state = EXCLUDED.session_state, revision = {snapshots}.revision + 1,"
+                    " session_state = EXCLUDED.session_state,"
                     " updated_at = now(), expires_at = EXCLUDED.expires_at, purged_at = NULL"
                 ).format(snapshots=self._names.table("thread_snapshots"), expires=EXPIRES_AT),
                 self._params(scope, thread_id) | values | {"ttl": self._ttl()},
@@ -95,7 +98,10 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
 
     async def get(self, *, scope: str, thread_id: str) -> AGUIThreadSnapshot | None:
         """The latest snapshot, or ``None`` when absent or purged."""
-        async with self._client.connection() as connection, connection.cursor(row_factory=dict_row) as cursor:
+        async with (
+            self._client.connection(transactional=False) as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 sql.SQL(
                     "SELECT messages, state, interrupt, session_state, purged_at FROM {snapshots} WHERE {key}"
@@ -103,7 +109,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
                 self._params(scope, thread_id),
             )
             row = await cursor.fetchone()
-        if row is None or row["purged_at"] is not None or row["messages"] is None:
+        if row is None or row["purged_at"] is not None:
             return None
         return AGUIThreadSnapshot(
             messages=row["messages"], state=row["state"], interrupt=row["interrupt"], session_state=row["session_state"]
@@ -124,30 +130,33 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
             row = await cursor.fetchone()
         return row is not None and bool(row[0])
 
-    async def clear(self, *, scope: str | None = None) -> None:
-        """Remove every snapshot of this application, or only one scope's."""
-        params: dict[str, Any] = {
-            "app": self.application_id,
-            "scope": require_text(scope, "scope") if scope is not None else None,
-        }
+    async def clear(self, *, scope: SnapshotScope | None = None) -> None:
+        """Remove one scope's snapshots, or every snapshot of this application when ``scope`` is ``None``.
+
+        The signature is the ``AGUIThreadSnapshotStore`` protocol's. An explicit empty scope raises ``ValueError``.
+        """
+        if scope is None:
+            query = sql.SQL("DELETE FROM {snapshots} WHERE application_id = %(app)s")
+            params: dict[str, Any] = {"app": self.application_id}
+        else:
+            query = sql.SQL("DELETE FROM {snapshots} WHERE application_id = %(app)s AND scope = %(scope)s")
+            params = {"app": self.application_id, "scope": require_text(scope, "scope")}
         async with self._client.connection() as connection:
-            await connection.execute(
-                sql.SQL(
-                    "DELETE FROM {snapshots} WHERE application_id = %(app)s"
-                    " AND (%(scope)s::text IS NULL OR scope = %(scope)s)"
-                ).format(snapshots=self._names.table("thread_snapshots")),
-                params,
-            )
+            await connection.execute(query.format(snapshots=self._names.table("thread_snapshots")), params)
 
     async def purge(self) -> PurgeReport:
         """Purge expired snapshots in this store's mode, whatever policy stamped them."""
-        async with self._client.connection() as connection:
-            count = await purge_rows(
-                connection,
-                table=self._names.table("thread_snapshots"),
-                where=sql.SQL("application_id = %(app)s"),
-                params={"app": self.application_id},
-                mode=self._retention.mode,
-                tombstone=sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
-            )
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("thread_snapshots"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode=self._retention.mode,
+            tombstone=sql.SQL("messages = NULL, state = NULL, interrupt = NULL, session_state = NULL"),
+        )
         return PurgeReport({f"{self._names.prefix}thread_snapshots": count})
+
+
+if TYPE_CHECKING:
+    # The assignment is the test; pyright checks protocol compatibility.
+    _PROTOCOL_CHECK: type[AGUIThreadSnapshotStore] = PostgresAGUIThreadSnapshotStore

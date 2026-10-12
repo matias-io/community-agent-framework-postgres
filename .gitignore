@@ -9,3 +9,6 @@ build/
 .coverage
 uv.lock.bak
 .env
+
+CLAUDE.md
+AGENTS.md

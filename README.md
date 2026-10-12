@@ -1,7 +1,7 @@
 # community-agent-framework-postgres
-A community-maintained PostgreSQL persistence implementation for Microsoft Agent Framework (MAF), supporting agent chat history, sessions, workflow checkpoints, AG-UI snapshots, and durable JSON documents.
+A community-maintained PostgreSQL persistence implementation for Microsoft Agent Framework (MAF), supporting agent chat history, sessions, workflow checkpoints, AG-UI snapshots, and a lease that serializes work across replicas.
 
-The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresDocumentStore` for JSON documents with revisions and leases. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
+The package provides `PostgresHistoryProvider` for chat history, `PostgresSessionStore` for `AgentSession` snapshots, `PostgresCheckpointStorage` for workflow checkpoints, `PostgresAGUIThreadSnapshotStore` for AG-UI thread snapshots and `PostgresLeases` for a lock across replicas. `PostgresPersistence` creates all of them over one connection pool and runs the schema migrations. This is a community package written by Matias Suxo Salinas. Microsoft does not maintain or support it.
 
 ## Status
 
@@ -11,23 +11,27 @@ Alpha. Public names and constructor arguments may change in a 0.x minor release,
 
 | 0.1.1 | Declared | Tested |
 |---|---|---|
-| `agent-framework-core` | `>=1.19.0,<2` | 1.19.x, 1.20.x |
-| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.4.0,<2` | 1.4.x, 1.5.x |
-| Python | `>=3.11` | 3.11 to 3.14; 3.15.0b4 smoke-tested, not supported yet |
+| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0, 1.21.0 |
+| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0, 1.5.1 |
+| Python | `>=3.11` | 3.11, 3.12, 3.13, 3.14 |
 | PostgreSQL | | 16, 17 |
-| psycopg | `>=3.3.5,<4` | 3.3.5 or later, below 4 |
+| psycopg | `>=3.3.5,<4` | 3.3.6 |
 
-With an `agent-framework-core` or `agent-framework-ag-ui` minor newer than the tested ones, the package still imports and emits an `UntestedAgentFrameworkWarning`; see [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) for the support policy and how to silence it. 0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed. 0.1.1 supersedes it and is intended as the first PyPI release.
+pip and uv refuse a MAF version outside the declared range. A newer minor inside it installs. The first store or hub built in a process then logs one warning for each untested distribution, and a new major, which pip and uv install only when forced, is logged as outside the declared range. `compatibility()` returns the installed and tested versions for a diagnostics command. A newer minor is expected to work, because MAF keeps breaking changes for major versions. [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md) explains the support policy and the compatibility check.
+
+MAF 1.19 and older are not supported. Their history dedupe drops any new message that matches one already stored, so a user who answers "yes" twice loses the second "yes". MAF 1.20 fixed that, so 1.20 is the floor.
+
+0.1.1 is the first release on PyPI. 0.1.0 was never published.
 
 ## What it implements
 
 | Class | MAF interface | Extra | Conditions |
 |---|---|---|---|
-| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with the installed MAF's own rule, which changed in 1.20; tested on MAF 1.19 and 1.20 |
+| `PostgresHistoryProvider` | `HistoryProvider` | none | Drops replayed messages with MAF's own `filter_new_messages` |
 | `PostgresSessionStore` | `SessionStore` | none | MAF marks `SessionStore` experimental |
 | `PostgresCheckpointStorage` | `CheckpointStorage` | none | Decodes only MAF's safe types and its own; `allowed_checkpoint_types` adds more |
-| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store`; tested on `agent-framework-ag-ui` 1.4 and 1.5 |
-| `PostgresDocumentStore`, `PostgresLeases` | none (this package's own) | none | |
+| `PostgresAGUIThreadSnapshotStore` | `AGUIThreadSnapshotStore` | `ag-ui` | The AG-UI endpoint needs a `snapshot_scope_resolver` next to `snapshot_store` |
+| `PostgresLeases` | none (this package's own) | none | A cross-replica lock; MAF hosting serializes runs per process only |
 | `PostgresPersistence` | none (creates the stores above over one pool) | none | |
 | Microsoft Entra ID sign-in (`credential=`) | none | `azure` | Azure Database for PostgreSQL with Entra authentication |
 
@@ -77,14 +81,15 @@ async def main() -> None:
         await hub.session_store().set("session-1", AgentSession(session_id="session-1"))
         print(await hub.checkpoint_storage(scope="session-1").list_checkpoint_ids(workflow_name="demo"))
         print(await hub.thread_snapshot_store().get(scope="user-1", thread_id="thread-1"))
-        print(await hub.document_store(collection="notes").put(scope="user-1", key="n1", payload={"text": "hi"}))
 
 
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
     runner.run(main())
 ```
 
-Every store the hub creates shares its pool, `application_id`, `schema` and `table_prefix`. The factories raise `TypeError` if you pass `application_id`, `client`, `credential`, `schema` or `table_prefix`. For another schema or prefix, create a separate hub or a standalone store. You can override `retention` per store. `hub.purge()` covers every store created by that hub, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
+`compatibility()` returns the installed and tested MAF versions, for a startup check or a diagnostics command.
+
+Every store the hub creates shares its pool, `application_id`, `schema` and `table_prefix`. The factories raise `TypeError` if you pass `application_id`, `client`, `credential`, `pool_kwargs`, `schema` or `table_prefix`. For another schema or prefix, create a separate hub or a standalone store. You can override `retention` per store. `hub.purge()` covers every store created by that hub, including one with its own `retention`, and needs no policy of its own. It purges the rows whose `expires_at` has passed, in the mode you pass or else the hub policy's mode. `hub.leases()` returns a `PostgresLeases` over the same pool. After `hub.close()`, every store it created raises `PostgresStorageError`, even when the hub was built over your own pool.
 
 ## Use with Agent Framework
 
@@ -215,12 +220,16 @@ Every store and the hub take the same connection arguments.
 
 - `connection_string` or `client`. Pass exactly one. When both are absent, the connection string comes from `POSTGRES_CONNECTION_STRING`, read through MAF's `load_settings`. An explicit argument wins over the `.env` file named by `env_file_path`, which wins over the environment.
 - `client` is a psycopg `AsyncConnection` or `AsyncConnectionPool`. A pool that is not open is opened on first use. The package never closes a client it did not create.
-- `credential` signs the owned pool in to Azure Database for PostgreSQL with Microsoft Entra ID tokens. It needs a connection string and cannot be combined with `client`. See [Microsoft Entra ID on Azure](#microsoft-entra-id-on-azure).
-- A single `AsyncConnection` runs one call at a time. Every store and hub over it waits for the same lock, so a server should pass a pool. On a connection already inside your own transaction, each call becomes a savepoint, and transaction-scoped locks (the history save lock and the migration lock) are held until your transaction ends.
+- `credential` signs the owned pool in to Azure Database for PostgreSQL with Microsoft Entra ID tokens. It needs a connection string and cannot be combined with `client`. With a credential, the pool defaults to `sslmode=verify-full` with `sslrootcert=system`. An `sslmode` or `sslrootcert` set in `pool_kwargs["kwargs"]`, the connection string, `PGSSLMODE` or `PGSSLROOTCERT` takes precedence over these defaults, and the store or hub raises `ValueError` when it is created if the `sslmode` in effect is `disable`, `allow` or `prefer`. An explicit `sslmode` also drops the `sslrootcert=system` default. On Windows, `system` finds no certificates in psycopg's binary wheel, so set `PGSSLROOTCERT` to a CA file; [docs/azure-entra.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/azure-entra.md) says which. See [Microsoft Entra ID on Azure](#microsoft-entra-id-on-azure).
+- A single `AsyncConnection` runs one call at a time. Every store and hub over it waits for the same lock, so a server should pass a pool. On a connection already inside your own transaction, writes and multi-statement calls become a savepoint, single-statement reads run directly inside your transaction, and transaction-scoped locks (the history save lock and the migration lock) are held until your transaction ends.
 - A connection string makes the store own a pool with `min_size=1`, `max_size=10`, autocommit, libpq `connect_timeout=10` unless the string sets one, and a pool `timeout` of 10 seconds.
-- `schema="public"` must be a lowercase identifier that does not start with `pg_`. `table_prefix="af_"` allows lowercase letters, digits and underscores, up to 35 bytes.
+- The owned pool also sets TCP keepalives (`keepalives=1`, `keepalives_idle=30`, `keepalives_interval=10`, `keepalives_count=3`) and `tcp_user_timeout=30000` unless the connection string sets them, so a silently dead connection fails within about a minute. The pool sets no statement or lock timeout; `migrate()` sets its own lock timeout.
+- `pool_kwargs` is merged over the owned pool's defaults, and the `kwargs` entry inside it over the connection defaults; for example `{"max_size": 50, "kwargs": {"prepare_threshold": None}}` for PgBouncer. A connection parameter in `kwargs` wins over the same parameter in the connection string. It cannot be combined with `client`.
+- `schema="public"` must be a lowercase identifier that does not start with `pg_`. `table_prefix="af_"` allows lowercase letters, digits and underscores, up to 28 bytes.
 
-When the database is down or rejects the login, or every pooled connection stays busy, each call raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` after about 10 seconds. psycopg_pool raises the same timeout in both cases, so the message names both. Over your own pool, the message gives that pool's `timeout`. The owned pool keeps retrying in the background and recovers when the database returns. psycopg_pool logs the driver's reason on the `psycopg.pool` logger. If you need other timeouts, pass your own pool. A malformed connection string raises `PostgresStorageError("Invalid connection string.")` and never repeats libpq's text, which can contain the password.
+When the database is down or rejects the login, or every pooled connection stays busy, each call raises `PostgresStorageError("No PostgreSQL connection became available within 10 seconds: ...")` after about 10 seconds. psycopg_pool raises the same timeout in both cases, so the message names both. Over your own pool, the message gives that pool's `timeout`. The owned pool keeps retrying in the background and recovers when the database returns. psycopg_pool logs the driver's reason on the `psycopg.pool` logger. If you need other timeouts, set them through `pool_kwargs` or pass your own pool. A malformed connection string raises `PostgresStorageError("Invalid connection string.")` and never repeats libpq's text, which can contain the password.
+
+A driver failure raises `PostgresStorageError` with the driver exception chained as the cause. Its `sqlstate` is the server's error code when there was one. Its `retryable` is `True` for SQLSTATE classes `08` (connection exceptions), `40` (serialization failures and deadlocks), `53` (insufficient resources, such as too many connections), codes `57P0x` (operator intervention, such as an administrator shutdown) and `55P03` (a lock timeout), for a connection lost without a SQLSTATE, and for the pool timeout above. A fresh call may get past these.
 
 After a database restart or failover, each stale connection in the owned pool fails one call before the pool replaces it. Behind PgBouncer in transaction mode older than 1.21, or without `max_prepared_statements`, psycopg's prepared statements fail, because psycopg prepares a query after its fifth run. For either case, pass your own pool. `check=AsyncConnectionPool.check_connection` tests each connection as the pool hands it out, at the cost of one round trip, and `prepare_threshold=None` turns prepared statements off.
 
@@ -281,19 +290,18 @@ Tables are created in `schema` and named `{table_prefix}{name}`. With the defaul
 |---|---|---|
 | `af_history_messages` | `id`, read by application, tenant, agent, source and session | One `Message.to_dict()` per row |
 | `af_sessions` | `application_id, session_id` | `AgentSession.to_dict()` |
-| `af_checkpoints` | `application_id, scope, checkpoint_id` | The encoded `WorkflowCheckpoint` |
+| `af_checkpoints` | `application_id, tenant_id, scope, checkpoint_id` | The encoded `WorkflowCheckpoint` |
 | `af_thread_snapshots` | `application_id, scope, thread_id` | The latest AG-UI thread snapshot |
-| `af_documents` | `application_id, collection, scope, key` | Payload, metadata and revision |
 | `af_leases` | `application_id, resource` | Lease owner, token and expiry |
 | `af_migrations` | `version` | Applied migration versions |
 
 ## Retention
 
-Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages and checkpoints are always deleted. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
+Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every write sets `expires_at` to now plus the TTL, and `purge()` or the `purge` CLI command tombstones or deletes the rows whose `expires_at` has passed. History messages, checkpoints and expired leases are always deleted. Leases take no policy. A history session is purged whole, once every one of its messages has expired, so an active conversation keeps its transcript. A purge works in batches of 1000 rows, one transaction per batch, and skips rows another purge has locked. `hub.purge()` covers every table, leases included. It returns a `PurgeReport`; `report.counts` is a read-only mapping, so use `dict(report.counts)` for a copy you can change. Until a purge runs, reads still return expired rows. See [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md).
 
 ## Private Agent Framework imports
 
-The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB and Redis packages import the same names. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md).
+The package uses three names MAF does not export. `filter_new_messages` deduplicates history, and `encode_checkpoint_value` and `decode_checkpoint_value` encode checkpoints. Microsoft's own Cosmos DB package imports all three, and its Redis package imports `filter_new_messages`. `_framework.py` is the only module that imports them, and `tests/unit/test_framework.py` fails when one of them moves. CI also runs the suite against the newest `agent-framework-core` the declared range allows, and a weekly canary runs it against the newest MAF release, so an upstream rename shows up there first. See [docs/compatibility.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/compatibility.md).
 
 ## Development
 
@@ -315,7 +323,7 @@ Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests
 - [docs/sessions.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/sessions.md) covers `PostgresSessionStore`.
 - [docs/checkpoints.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/checkpoints.md) covers `PostgresCheckpointStorage`.
 - [docs/thread-snapshots.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/thread-snapshots.md) covers `PostgresAGUIThreadSnapshotStore`.
-- [docs/documents-and-leases.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/documents-and-leases.md) covers `PostgresDocumentStore` and `PostgresLeases`.
+- [docs/leases.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/leases.md) covers `PostgresLeases`.
 - [docs/retention.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/retention.md) covers `RetentionPolicy` and purging.
 - [docs/migrations.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/migrations.md) covers `migrate()`, the CLI and SQL for a DBA.
 - [docs/azure-entra.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.1/docs/azure-entra.md) covers Microsoft Entra ID sign-in on Azure Database for PostgreSQL.

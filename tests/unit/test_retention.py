@@ -29,8 +29,8 @@ def test_policy_rejects_unknown_mode() -> None:
 
 
 def test_purge_report_adds_and_totals() -> None:
-    report = PurgeReport({"af_documents": 2}) + PurgeReport({"af_sessions": 3, "af_documents": 1})
-    assert report.counts == {"af_documents": 3, "af_sessions": 3}
+    report = PurgeReport({"af_checkpoints": 2}) + PurgeReport({"af_sessions": 3, "af_checkpoints": 1})
+    assert report.counts == {"af_checkpoints": 3, "af_sessions": 3}
     assert report.total == 6
 
 
@@ -39,81 +39,81 @@ def test_expires_at_fragment_uses_the_ttl_parameter_twice() -> None:
 
 
 def test_purge_reports_sum_without_a_start_value() -> None:
-    total = sum([PurgeReport({"af_documents": 2}), PurgeReport({"af_sessions": 3})])
+    total = sum([PurgeReport({"af_checkpoints": 2}), PurgeReport({"af_sessions": 3})])
     assert isinstance(total, PurgeReport)
-    assert total.counts == {"af_documents": 2, "af_sessions": 3}
+    assert total.counts == {"af_checkpoints": 2, "af_sessions": 3}
 
 
 def test_purge_report_counts_are_a_read_only_copy() -> None:
-    source = {"af_documents": 1}
+    source = {"af_checkpoints": 1}
     report = PurgeReport(source)
-    source["af_documents"] = 5
-    assert report.counts == {"af_documents": 1}
+    source["af_checkpoints"] = 5
+    assert report.counts == {"af_checkpoints": 1}
     with pytest.raises(TypeError):
-        report.counts["af_documents"] = 2  # type: ignore[index]
+        report.counts["af_checkpoints"] = 2  # type: ignore[index]
 
 
 def test_purge_report_pickles_and_copies() -> None:
-    report = PurgeReport({"af_documents": 2, "af_sessions": 0})
+    report = PurgeReport({"af_checkpoints": 2, "af_sessions": 0})
     for clone in (pickle.loads(pickle.dumps(report)), copy.deepcopy(report), copy.copy(report)):
         assert clone == report
         assert clone.total == 2
         with pytest.raises(TypeError):
-            clone.counts["af_documents"] = 3  # type: ignore[index]
+            clone.counts["af_checkpoints"] = 3  # type: ignore[index]
 
 
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda counts: counts.__setitem__("af_documents", 2),
-        lambda counts: counts.__delitem__("af_documents"),
+        lambda counts: counts.__setitem__("af_checkpoints", 2),
+        lambda counts: counts.__delitem__("af_checkpoints"),
         lambda counts: counts.update({"af_sessions": 1}),
-        lambda counts: counts.pop("af_documents"),
+        lambda counts: counts.pop("af_checkpoints"),
         lambda counts: counts.popitem(),
         lambda counts: counts.setdefault("af_sessions", 1),
         lambda counts: counts.clear(),
     ],
 )
 def test_purge_report_counts_refuse_every_change(mutate: object) -> None:
-    report = PurgeReport({"af_documents": 1})
+    report = PurgeReport({"af_checkpoints": 1})
     with pytest.raises((TypeError, AttributeError)):  # no mutators at all, as on a MappingProxyType
         mutate(report.counts)  # type: ignore[operator]
-    assert report.counts == {"af_documents": 1}
+    assert report.counts == {"af_checkpoints": 1}
 
 
 @pytest.mark.parametrize(
     "bypass",
     [
-        lambda counts: dict.__setitem__(counts, "af_documents", 2),
+        lambda counts: dict.__setitem__(counts, "af_checkpoints", 2),
         lambda counts: dict.update(counts, {"af_sessions": 1}),
         lambda counts: dict.clear(counts),
         lambda counts: setattr(counts, "_data", {"af_sessions": 1}),
     ],
 )
 def test_purge_report_counts_refuse_dict_bypasses(bypass: object) -> None:
-    report = PurgeReport({"af_documents": 1})
+    report = PurgeReport({"af_checkpoints": 1})
     with pytest.raises(TypeError):
         bypass(report.counts)  # type: ignore[operator]
-    assert report.counts == {"af_documents": 1}
+    assert report.counts == {"af_checkpoints": 1}
 
 
 def test_calling_init_again_changes_nothing() -> None:
-    report = PurgeReport({"af_documents": 1})
+    report = PurgeReport({"af_checkpoints": 1})
     report.counts.__init__({"af_sessions": 9})  # type: ignore[misc]
-    assert report.counts == {"af_documents": 1}
+    assert report.counts == {"af_checkpoints": 1}
 
 
 def test_purge_report_counts_is_a_mapping_not_a_dict() -> None:
-    report = PurgeReport({"af_documents": 1})
+    report = PurgeReport({"af_checkpoints": 1})
     assert isinstance(report.counts, Mapping)
     assert not isinstance(report.counts, dict)
-    assert dict(report.counts) == {"af_documents": 1}
-    assert len(report.counts) == 1 and list(report.counts) == ["af_documents"]
-    assert repr(report) == "PurgeReport(counts={'af_documents': 1})"
-    assert report.counts != {"af_documents": 2}
+    assert dict(report.counts) == {"af_checkpoints": 1}
+    assert len(report.counts) == 1 and list(report.counts) == ["af_checkpoints"]
+    assert repr(report) == "PurgeReport(counts={'af_checkpoints': 1})"
+    assert report.counts != {"af_checkpoints": 2}
     assert type(dataclasses.asdict(report)["counts"]) is dict
 
 
 def test_purge_report_works_with_asdict() -> None:
-    assert dataclasses.asdict(PurgeReport({"af_documents": 1})) == {"counts": {"af_documents": 1}}
+    assert dataclasses.asdict(PurgeReport({"af_checkpoints": 1})) == {"counts": {"af_checkpoints": 1}}
     assert PurgeReport({"a": 1}) == PurgeReport({"a": 1}) != PurgeReport({"a": 2})

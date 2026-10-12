@@ -17,7 +17,6 @@ from psycopg_pool import AsyncConnectionPool
 from agent_framework_community_postgres import (
     PostgresAGUIThreadSnapshotStore,
     PostgresCheckpointStorage,
-    PostgresDocumentStore,
     PostgresHistoryProvider,
     PostgresLeases,
     PostgresPersistence,
@@ -25,7 +24,7 @@ from agent_framework_community_postgres import (
     PostgresStorageError,
 )
 from agent_framework_community_postgres._client import ClientHandle, create_client
-from agent_framework_community_postgres._entra import ENTRA_SCOPE, entra_connection_class
+from agent_framework_community_postgres._entra import ENTRA_SCOPE, entra_connection_class, entra_connection_kwargs
 
 TOKEN_SECRET = "TOKENSECRET"
 
@@ -133,14 +132,45 @@ async def test_no_user_anywhere_names_the_fix(captured: list[tuple[str, dict[str
     assert captured == []
 
 
-async def test_sslmode_require_is_added_only_when_missing(captured: list[tuple[str, dict[str, Any]]]) -> None:
+async def test_sslmode_verify_full_is_added_only_when_missing(
+    captured: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    monkeypatch.delenv("PGSSLROOTCERT", raising=False)
     connection_class = entra_connection_class(SyncCredential())
     await connection_class.connect("host=db user=app")
     await connection_class.connect("host=db user=app sslmode=verify-full")
     await connection_class.connect("postgresql://app@db/app?sslmode=disable")
-    assert captured[0][1]["sslmode"] == "require"
+    assert captured[0][1]["sslmode"] == "verify-full"
     assert "sslmode" not in captured[1][1]
     assert "sslmode" not in captured[2][1]
+
+
+async def test_default_sslmode_is_verify_full_with_system_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    monkeypatch.delenv("PGSSLROOTCERT", raising=False)
+    kwargs: dict[str, Any] = {}
+    await entra_connection_kwargs(SyncCredential(_jwt({"upn": "ada@contoso.com"})), "host=h dbname=d", kwargs)
+    assert kwargs["sslmode"] == "verify-full"
+    assert kwargs["sslrootcert"] == "system"
+
+
+async def test_an_explicit_sslmode_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    kwargs: dict[str, Any] = {}
+    await entra_connection_kwargs(
+        SyncCredential(_jwt({"upn": "ada@contoso.com"})), "host=h dbname=d sslmode=require", kwargs
+    )
+    assert "sslmode" not in kwargs and "sslrootcert" not in kwargs
+
+
+async def test_pgsslrootcert_in_the_environment_is_respected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    monkeypatch.setenv("PGSSLROOTCERT", "/etc/ssl/azure.pem")
+    kwargs: dict[str, Any] = {}
+    await entra_connection_kwargs(SyncCredential(_jwt({"upn": "ada@contoso.com"})), "host=h dbname=d", kwargs)
+    assert kwargs["sslmode"] == "verify-full"
+    assert "sslrootcert" not in kwargs  # libpq applies PGSSLROOTCERT itself
 
 
 async def test_a_failing_credential_is_named_with_its_cause(captured: list[tuple[str, dict[str, Any]]]) -> None:
@@ -336,7 +366,6 @@ async def test_the_owned_pool_uses_the_entra_connection_class() -> None:
         (PostgresSessionStore, {}),
         (PostgresCheckpointStorage, {}),
         (PostgresAGUIThreadSnapshotStore, {}),
-        (PostgresDocumentStore, {"collection": "c"}),
         (PostgresLeases, {}),
     ],
 )

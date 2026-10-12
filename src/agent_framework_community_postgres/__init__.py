@@ -14,12 +14,10 @@ from ._client import (
     PostgresClient,
     PostgresSettings,
     PostgresStorageError,
-    RevisionConflict,
     TableNames,
 )
-from ._document_store import Document, DocumentSummary, PostgresDocumentStore
 from ._entra import ENTRA_SCOPE, EntraCredential
-from ._framework import UntestedAgentFrameworkWarning, warn_if_untested_agent_framework
+from ._framework import Compatibility, compatibility
 from ._history_provider import PostgresHistoryProvider
 from ._leases import Lease, PostgresLeases
 from ._migrations import MIGRATIONS, MigrationReport
@@ -35,9 +33,6 @@ try:
     __version__ = version("community-agent-framework-postgres")
 except PackageNotFoundError:  # pragma: no cover - source checkout without install
     __version__ = "0.0.0"
-
-# Points at the import that loaded this package; the import machinery's own frames are skipped.
-warn_if_untested_agent_framework(stacklevel=2)
 
 _LAZY = {"PostgresAGUIThreadSnapshotStore"}
 
@@ -57,8 +52,7 @@ def __dir__() -> list[str]:
 __all__ = [
     "ENTRA_SCOPE",
     "MIGRATIONS",
-    "Document",
-    "DocumentSummary",
+    "Compatibility",
     "EntraCredential",
     "Lease",
     "LeaseLost",
@@ -67,7 +61,6 @@ __all__ = [
     "PostgresAGUIThreadSnapshotStore",
     "PostgresCheckpointStorage",
     "PostgresClient",
-    "PostgresDocumentStore",
     "PostgresHistoryProvider",
     "PostgresLeases",
     "PostgresPersistence",
@@ -77,9 +70,8 @@ __all__ = [
     "PurgeReport",
     "RetentionMode",
     "RetentionPolicy",
-    "RevisionConflict",
     "TableNames",
-    "UntestedAgentFrameworkWarning",
     "__version__",
+    "compatibility",
     "render_migrations",
 ]

@@ -38,12 +38,14 @@ The key follows `RedisHistoryProvider`. These ids select rows. They do not autho
 ## Behaviour
 
 - `session_id` must be a non-empty `str`. `None` or `''` raises `ValueError`.
-- `save_messages` takes a transaction-scoped advisory lock on the session before it reads, so concurrent saves apply MAF's replay rule to the latest stored history. On a connection already inside your own transaction, that lock is held until your transaction ends.
+- `save_messages` takes a transaction-scoped advisory lock on the session before it reads, inside a `READ COMMITTED` transaction, so concurrent saves apply MAF's replay rule to the latest stored history whatever the server's default isolation level. The lock key includes the schema and table prefix. On a connection already inside your own transaction, your transaction's isolation level applies and the lock is held until your transaction ends.
 - A single `AsyncConnection` runs one call at a time across every store that uses it, so a server should pass a pool.
-- A replayed transcript is deduplicated with MAF's `filter_new_messages`. Only the messages after the stored ones are inserted. The rule is the installed MAF's, and it changed in 1.20; see [compatibility.md](compatibility.md#support-policy).
-- A row that is not a JSON object or fails `Message.from_dict` is skipped with a warning on the `agent_framework_community_postgres._history_provider` logger.
-- `list_sessions()` returns the session ids under this provider's application, tenant, agent and source, sorted.
-- `clear(session_id)` deletes one session's rows.
+- A replayed transcript is deduplicated with MAF's `filter_new_messages`. Messages that overlap the end of the stored history are dropped as a replay, and everything else is inserted, including a message the user repeats. The rule is the installed MAF's; see [compatibility.md](compatibility.md#behaviour-maf-owns).
+- To deduplicate, a save reads only the newest stored rows, as many as the messages it was given. The result is the same as reading the whole session: MAF 1.20's `filter_new_messages` compares the end of the stored history with the start of the incoming batch, or looks for the whole stored history inside the batch, and both comparisons only look at that many stored rows. A save's cost therefore does not grow with the length of the session.
+- If a row in that window is not a JSON object or fails `Message.from_dict`, the save raises `PostgresStorageError` and writes nothing, because it cannot tell which incoming messages are replays. Clear the session or repair the row.
+- `get_messages` loads the whole session. A row that is not a JSON object or fails `Message.from_dict` is skipped with a warning on the `agent_framework_community_postgres._history_provider` logger. Set `max_messages` to bound how much a session keeps and loads.
+- `list_sessions(*, limit=None, after=None)` returns the session ids under this provider's application, tenant, agent and source, sorted. `limit` caps the page, and `after` starts the page after that id, so pass the last id of one page to get the next.
+- `clear(session_id)` deletes one session's rows. It takes the same lock as `save_messages`, so it runs before or after a concurrent save, never in the middle of one.
 - When an agent runs without a session, MAF creates a new session id for each call, so every stateless run writes a new history. Pass a session to `agent.run`, or set retention so old histories are purged.
 
 ## Use with an agent
@@ -112,4 +114,4 @@ It prints `['hi', 'hello', 'thanks']` and then `['session-1']`.
 
 ## Retention
 
-Each message is its own row, and its `expires_at` is set once, to its insert time plus the TTL. Later messages in the same session do not extend it. `purge()` deletes expired rows one by one, so an active session loses its oldest messages once they are older than the TTL. Choose a TTL longer than the conversations you need to keep whole. `purge()` on the provider covers its application, tenant, agent and source, across all sessions. History rows are always deleted, never tombstoned. See [retention.md](retention.md).
+Each message is its own row, and its `expires_at` is set once, to its insert time plus the TTL. A purge deletes a session's messages only when none of them is still live. A message saved without a TTL has no `expires_at` and never expires, so it keeps its whole session. An active session keeps its whole transcript, so it never loses its first messages or a tool call's result. Nothing is rewritten when a message is saved. `purge()` on the provider covers its application, tenant, agent and source, across all sessions. History rows are always deleted, never tombstoned. See [retention.md](retention.md).

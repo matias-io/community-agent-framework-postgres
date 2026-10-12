@@ -3,6 +3,8 @@
 azure-identity stays optional: a credential is anything with ``get_token(*scopes)``, sync or async, so this
 module never imports ``azure``. PostgreSQL checks the password only at login, so a connection stays
 authenticated after its token expires; the pool's ``max_lifetime`` bounds how long such a connection lives.
+The token is a bearer credential, so the connection verifies the server (``sslmode=verify-full`` against the
+system trust store) unless the connection string or libpq's environment chooses otherwise.
 
 ``connect`` runs inside psycopg_pool's background workers, which log a failure and retry, so a sign-in
 failure is logged here and remembered on the connection class for the pool-timeout message, and
@@ -99,10 +101,11 @@ def _user_from_token(token: str) -> str | None:
 
 
 async def entra_connection_kwargs(credential: EntraCredential, conninfo: str, kwargs: dict[str, ConnParam]) -> None:
-    """Set ``password`` to a fresh token, ``user`` from the token, and ``sslmode=require``.
+    """Set ``password`` to a fresh token, ``user`` from the token, and ``sslmode=verify-full``.
 
-    ``user`` and ``sslmode`` are set only when neither the connection string, ``kwargs`` nor libpq's
-    ``PGUSER`` and ``PGSSLMODE`` environment variables set them.
+    ``user``, ``sslmode`` and ``sslrootcert`` are set only when neither the connection string,
+    ``kwargs`` nor libpq's ``PGUSER``, ``PGSSLMODE`` and ``PGSSLROOTCERT`` environment variables set
+    them. ``sslrootcert=system`` is added only together with the default ``sslmode``.
     """
     params = conninfo_to_dict(conninfo)
     token = await _fetch_token(credential)
@@ -116,7 +119,12 @@ async def entra_connection_kwargs(credential: EntraCredential, conninfo: str, kw
             )
         kwargs["user"] = user
     if "sslmode" not in params and "sslmode" not in kwargs and not os.environ.get("PGSSLMODE"):
-        kwargs["sslmode"] = "require"
+        # The token is a bearer credential for every Azure Database for PostgreSQL server: verify the peer.
+        # ``sslrootcert=system`` uses the operating system's trust store (libpq 16+; psycopg's binary
+        # wheel bundles libpq 18).
+        kwargs["sslmode"] = "verify-full"
+        if "sslrootcert" not in params and "sslrootcert" not in kwargs and not os.environ.get("PGSSLROOTCERT"):
+            kwargs["sslrootcert"] = "system"
 
 
 async def check_credential(credential: EntraCredential, conninfo: str, kwargs: Mapping[str, Any]) -> None:

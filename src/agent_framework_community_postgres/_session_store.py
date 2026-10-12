@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, ClassVar, cast
 
 from agent_framework import AgentSession, SecretString, SessionStore
@@ -23,6 +24,8 @@ class PostgresSessionStore(SessionStore, BaseStore):
     ``AgentSession.from_dict``. Restore a session with the same agent and provider
     configuration that created it, as the framework documents. ``SessionStore`` is
     marked experimental upstream; this implementation follows it.
+    Writes are last-writer-wins, as with the framework's ``SessionStore``; serialize
+    concurrent runs of one session in the host.
     """
 
     SNAPSHOT_VERSION: ClassVar[str] = "1"
@@ -39,6 +42,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
         schema: str = "public",
         table_prefix: str = "af_",
         retention: RetentionPolicy | None = None,
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         SessionStore.__init__(self)
         BaseStore.__init__(
@@ -52,21 +56,36 @@ class PostgresSessionStore(SessionStore, BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=retention,
+            pool_kwargs=pool_kwargs,
         )
 
     async def get(self, session_id: str) -> AgentSession | None:
-        """A fresh copy of the stored session, or ``None`` when absent or purged."""
+        """A fresh copy of the stored session, or ``None`` when absent or purged.
+
+        Raises:
+            ValueError: The row holds a snapshot this release cannot read. Delete it to start over.
+        """
         SessionStore.validate_session_id(session_id)
-        async with self._client.connection() as connection, connection.cursor(row_factory=dict_row) as cursor:
+        async with (
+            self._client.connection(transactional=False) as connection,
+            connection.cursor(row_factory=dict_row) as cursor,
+        ):
             await cursor.execute(
                 sql.SQL(
-                    "SELECT snapshot, purged_at FROM {sessions} WHERE application_id = %(app)s AND session_id = %(id)s"
+                    "SELECT snapshot, snapshot_version, purged_at FROM {sessions}"
+                    " WHERE application_id = %(app)s AND session_id = %(id)s"
                 ).format(sessions=self._names.table("sessions")),
                 {"app": self.application_id, "id": session_id},
             )
             row = await cursor.fetchone()
-        if row is None or row["purged_at"] is not None or not isinstance(row["snapshot"], dict):
+        if row is None or row["purged_at"] is not None:
             return None
+        if row["snapshot_version"] != self.SNAPSHOT_VERSION:
+            raise ValueError(
+                f"Unsupported session snapshot version {row['snapshot_version']!r}; expected {self.SNAPSHOT_VERSION!r}."
+            )
+        if not isinstance(row["snapshot"], dict):
+            raise ValueError("The stored session snapshot is not an object.")
         return AgentSession.from_dict(cast(dict[str, Any], row["snapshot"]))
 
     async def set(self, session_id: str, session: AgentSession) -> None:
@@ -80,7 +99,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
                     " VALUES (%(app)s, %(id)s, %(snapshot)s, %(version)s, {expires})"
                     " ON CONFLICT (application_id, session_id) DO UPDATE SET"
                     " snapshot = EXCLUDED.snapshot, snapshot_version = EXCLUDED.snapshot_version,"
-                    " revision = {sessions}.revision + 1, updated_at = now(),"
+                    " updated_at = now(),"
                     " expires_at = EXCLUDED.expires_at, purged_at = NULL"
                 ).format(sessions=self._names.table("sessions"), expires=EXPIRES_AT),
                 {
@@ -105,13 +124,12 @@ class PostgresSessionStore(SessionStore, BaseStore):
 
     async def purge(self) -> PurgeReport:
         """Purge expired sessions in this store's mode, whatever policy stamped them."""
-        async with self._client.connection() as connection:
-            count = await purge_rows(
-                connection,
-                table=self._names.table("sessions"),
-                where=sql.SQL("application_id = %(app)s"),
-                params={"app": self.application_id},
-                mode=self._retention.mode,
-                tombstone=sql.SQL("snapshot = NULL"),
-            )
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("sessions"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode=self._retention.mode,
+            tombstone=sql.SQL("snapshot = NULL"),
+        )
         return PurgeReport({f"{self._names.prefix}sessions": count})

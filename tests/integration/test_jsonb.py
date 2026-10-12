@@ -13,7 +13,7 @@ from agent_framework_community_postgres import PostgresPersistence
 pytestmark = pytest.mark.integration
 
 SECRET = "SECRETPAYLOAD"
-TABLES = ("history_messages", "sessions", "checkpoints", "thread_snapshots", "documents")
+TABLES = ("history_messages", "sessions", "checkpoints", "thread_snapshots")
 
 
 def _writes(hub: PostgresPersistence, bad: object) -> dict[str, Callable[[], Awaitable[object]]]:
@@ -30,7 +30,6 @@ def _writes(hub: PostgresPersistence, bad: object) -> dict[str, Callable[[], Awa
     message = Message(role="user", contents=["x"], additional_properties={"bad": bad})
     return {
         "sessions": lambda: hub.session_store().set("s", session),
-        "documents": lambda: hub.document_store(collection="c").put(scope="s", key="k", payload={"bad": bad}),
         "history": lambda: hub.history_provider().save_messages("s", [Message(role="user", contents=["ok"]), message]),
         "snapshots": lambda: hub.thread_snapshot_store().save(
             scope="s", thread_id="t", snapshot=AGUIThreadSnapshot(messages=[], state={"bad": bad})
@@ -40,7 +39,7 @@ def _writes(hub: PostgresPersistence, bad: object) -> dict[str, Callable[[], Awa
 
 
 @pytest.mark.parametrize("bad", [f"{SECRET}\x00", float("nan")])
-@pytest.mark.parametrize("store", ["sessions", "documents", "history", "snapshots", "checkpoints"])
+@pytest.mark.parametrize("store", ["sessions", "history", "snapshots", "checkpoints"])
 async def test_unstorable_json_is_refused_and_writes_nothing(
     persistence: PostgresPersistence, bad: object, store: str
 ) -> None:

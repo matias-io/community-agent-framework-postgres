@@ -1,6 +1,6 @@
 # Sessions
 
-`PostgresSessionStore` is a MAF `SessionStore`. It stores one `AgentSession` snapshot per caller-chosen id in `af_sessions`. MAF marks `SessionStore` as experimental. This store follows its interface in `agent-framework-core` 1.19 and 1.20.
+`PostgresSessionStore` is a MAF `SessionStore`. It stores one `AgentSession` snapshot per caller-chosen id in `af_sessions`. MAF marks `SessionStore` as experimental, so its interface may change in a MAF minor. This store follows it as of `agent-framework-core` 1.20. MAF does not emit its `ExperimentalWarning` for this class, because MAF treats every module whose name starts with `agent_framework_` as its own.
 
 ## Columns
 
@@ -10,7 +10,6 @@
 | `session_id` | `text` | The id passed to `set`, `get` and `delete`. Part of the primary key |
 | `snapshot` | `jsonb` | `AgentSession.to_dict()`. `NULL` after a tombstone purge |
 | `snapshot_version` | `text` | This package's row format, currently `"1"` |
-| `revision` | `bigint` | Starts at 1 and grows by one on every `set` |
 | `created_at`, `updated_at` | `timestamptz` | First and latest write |
 | `expires_at` | `timestamptz` | Set when retention is on |
 | `purged_at` | `timestamptz` | Set by a tombstone purge |
@@ -27,10 +26,14 @@ PostgresSessionStore(*, application_id, ...)
 
 - `set(session_id, session)` stores `session.to_dict()` and replaces any earlier snapshot. Custom state types go through MAF's `register_state_type` codecs, as with any session store.
 - `get(session_id)` returns a new `AgentSession` built with `AgentSession.from_dict`, or `None` when the id is absent or purged. Changing the returned session does not change the stored one.
+- `get` raises `ValueError` when the row holds a snapshot this release cannot read: a `snapshot_version` other than `"1"`, or a snapshot that is not a JSON object. MAF's `FileSessionStore` raises `ValueError` for an unreadable file too. Delete the id to start over.
+- Writes are last-writer-wins, as with MAF's `SessionStore`. Two concurrent `set` calls on one id leave whichever ran last. If two runs of one session can overlap, serialize them in your application.
 - `delete(session_id)` removes the row. Deleting an absent id does nothing.
 - An empty or non-`str` id raises `ValueError`, as in MAF's in-memory store.
 - `set` rejects state containing `nan`, infinity or a NUL character with `ValueError` before it sends any SQL. See [compatibility.md](compatibility.md#jsonb-limits). MAF's in-memory store accepts such values because it never serializes them.
 - Restore a session with the same agent and provider configuration that created it.
+
+Session ids select rows. They do not authorize anyone, so bind them to the signed-in user or tenant in your application, as [history.md](history.md) says for history keys. The example below prefixes the id with the user id for that reason.
 
 ## Example
 

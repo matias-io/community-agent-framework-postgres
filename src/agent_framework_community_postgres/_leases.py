@@ -6,22 +6,38 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Mapping
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from typing import Any
 
 from agent_framework import SecretString
 from psycopg import sql
 
 from ._client import ClientHandle, LeaseLost, LeaseUnavailable, PostgresClient, require_text
 from ._entra import EntraCredential
-from ._retention import RetentionPolicy
+from ._retention import PurgeReport, RetentionPolicy, purge_rows
 from ._store import BaseStore
 
 logger = logging.getLogger(__name__)
 
 _FIRST_DELAY = 0.1
 _MAX_DELAY = 2.0
+_RELEASE_SECONDS = 5.0
+# Releases still running after their bound; the event loop keeps only weak references to tasks.
+_late_releases: set[asyncio.Task[None]] = set()
+
+
+async def _release_after_failure(lease: Lease) -> None:
+    """Release after a block raised, logging a failure here so the task never ends with an exception.
+
+    A shielded task that fails after its waiter gave up is otherwise logged by asyncio itself, with the
+    traceback, whatever its done callbacks retrieve.
+    """
+    try:
+        await lease.release()
+    except Exception:
+        logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
 
 
 class Lease:
@@ -67,6 +83,7 @@ class PostgresLeases(BaseStore):
         env_file_encoding: str | None = None,
         schema: str = "public",
         table_prefix: str = "af_",
+        pool_kwargs: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             application_id=application_id,
@@ -78,6 +95,7 @@ class PostgresLeases(BaseStore):
             schema=schema,
             table_prefix=table_prefix,
             retention=RetentionPolicy(),
+            pool_kwargs=pool_kwargs,
         )
 
     async def try_acquire(self, resource: str, *, owner: str, ttl: timedelta) -> Lease | None:
@@ -87,7 +105,7 @@ class PostgresLeases(BaseStore):
         if ttl <= timedelta(0):
             raise ValueError("ttl must be positive.")
         token = uuid.uuid4().hex
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "INSERT INTO {leases} (application_id, resource, owner, token, expires_at)"
@@ -124,18 +142,37 @@ class PostgresLeases(BaseStore):
         try:
             yield lease
         except BaseException:
+            # The block may have been cancelled; the release still runs, shielded and bounded, so a slow
+            # database cannot hold a cancelling task. An unreleased lease frees itself on expiry.
+            release = asyncio.ensure_future(_release_after_failure(lease))
+            _late_releases.add(release)
+            release.add_done_callback(_late_releases.discard)
             try:
-                await lease.release()
-            except Exception:
-                logger.warning("Could not release a lease after its block raised; it frees itself on expiry.")
+                await asyncio.wait_for(asyncio.shield(release), timeout=_RELEASE_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "A lease release did not finish in time after its block raised; it continues in the background."
+                )
             raise
         await lease.release()
+
+    async def purge(self) -> PurgeReport:
+        """Delete leases whose expiry has passed; an expired lease is already free, so nothing changes hands."""
+        count = await purge_rows(
+            self._client,
+            table=self._names.table("leases"),
+            where=sql.SQL("application_id = %(app)s"),
+            params={"app": self.application_id},
+            mode="delete",
+            tombstone=None,
+        )
+        return PurgeReport({f"{self._names.prefix}leases": count})
 
     def _lease_params(self, lease: Lease) -> dict[str, object]:
         return {"app": self.application_id, "resource": lease.resource, "owner": lease.owner, "token": lease.token}
 
     async def _renew(self, lease: Lease) -> None:
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL(
                     "UPDATE {leases} SET expires_at = now() + %(ttl)s"
@@ -148,7 +185,7 @@ class PostgresLeases(BaseStore):
                 raise LeaseLost("The lease expired or was taken over.", resource=lease.resource)
 
     async def _release(self, lease: Lease) -> None:
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(
                 sql.SQL(
                     "DELETE FROM {leases}"

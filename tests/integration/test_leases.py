@@ -1,10 +1,12 @@
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 
 import pytest
 
-from agent_framework_community_postgres import PostgresPersistence
+from agent_framework_community_postgres import PostgresPersistence, _leases
 from agent_framework_community_postgres._client import (
     ClientHandle,
     LeaseLost,
@@ -12,7 +14,7 @@ from agent_framework_community_postgres._client import (
     PostgresStorageError,
     TableNames,
 )
-from agent_framework_community_postgres._leases import PostgresLeases
+from agent_framework_community_postgres._leases import Lease, PostgresLeases
 
 pytestmark = pytest.mark.integration
 
@@ -61,21 +63,25 @@ async def test_one_holder_per_acquisition_even_with_one_owner(leases: PostgresLe
     await b.release()
 
 
-async def test_a_crashed_holder_is_taken_over_after_expiry(leases: PostgresLeases) -> None:
+async def test_a_crashed_holder_is_taken_over_after_expiry(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     crashed = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=1))
     assert crashed is not None
     assert await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30)) is None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     recovered = await leases.try_acquire("threads/g", owner="one", ttl=timedelta(seconds=30))
     assert recovered is not None
     await recovered.renew()
     await recovered.release()
 
 
-async def test_expired_lease_is_taken_over_and_old_holder_learns_on_renew(leases: PostgresLeases) -> None:
+async def test_expired_lease_is_taken_over_and_old_holder_learns_on_renew(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     first = await leases.try_acquire("threads/d", owner="one", ttl=timedelta(seconds=1))
     assert first is not None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     async with leases.acquire("threads/d", owner="two", ttl=timedelta(seconds=30), wait=timedelta(seconds=2)):
         with pytest.raises(LeaseLost):
             await first.renew()
@@ -115,10 +121,12 @@ async def test_release_failure_surfaces_when_the_body_succeeded(persistence: Pos
             await persistence.close()
 
 
-async def test_expired_lease_nobody_took_raises_lease_lost_on_renew(leases: PostgresLeases) -> None:
+async def test_expired_lease_nobody_took_raises_lease_lost_on_renew(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     lease = await leases.try_acquire("threads/i", owner="one", ttl=timedelta(seconds=1))
     assert lease is not None
-    await asyncio.sleep(1.5)
+    await expire("leases")
     with pytest.raises(LeaseLost):
         await lease.renew()
 
@@ -131,7 +139,9 @@ async def test_lease_is_released_when_the_body_raises(leases: PostgresLeases) ->
     assert other is not None
 
 
-async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(leases: PostgresLeases) -> None:
+async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(
+    leases: PostgresLeases, expire: Callable[[str], Awaitable[None]]
+) -> None:
     resource = "threads/secret-visitor"
     async with leases.acquire(resource, owner="one", ttl=timedelta(seconds=1)) as lease:
         with pytest.raises(LeaseUnavailable) as unavailable:
@@ -139,8 +149,115 @@ async def test_lease_errors_name_no_resource_and_carry_it_as_an_attribute(leases
                 pass
         assert "secret" not in str(unavailable.value)
         assert unavailable.value.resource == resource
-        await asyncio.sleep(1.5)
+        await expire("leases")
         with pytest.raises(LeaseLost) as lost:
             await lease.renew()
         assert "secret" not in str(lost.value)
         assert lost.value.resource == resource
+
+
+async def test_purge_deletes_expired_leases(
+    persistence: PostgresPersistence, expire: Callable[[str], Awaitable[None]]
+) -> None:
+    leases = persistence.leases()
+    assert await leases.try_acquire("r", owner="o", ttl=timedelta(seconds=30)) is not None
+    assert (await leases.purge()).counts == {"af_leases": 0}
+    await expire("leases")
+    assert (await leases.purge()).counts == {"af_leases": 1}
+    assert (await leases.purge()).counts == {"af_leases": 0}
+
+
+async def test_concurrent_acquisitions_have_one_winner(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    results = await asyncio.gather(
+        *(leases.try_acquire("r", owner=f"o{i}", ttl=timedelta(seconds=5)) for i in range(16))
+    )
+    assert sum(1 for r in results if r is not None) == 1
+
+
+async def test_concurrent_acquisitions_under_repeatable_read(
+    test_dsn: str, schema: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Under REPEATABLE READ a losing upsert raises a serialization failure instead of returning no lease.
+    monkeypatch.setenv("PGOPTIONS", r"-c default_transaction_isolation=repeatable\ read")
+    async with PostgresPersistence(application_id="tests", connection_string=test_dsn, schema=schema) as hub:
+        await hub.migrate()
+        leases = hub.leases()
+        for round_number in range(5):
+            results = await asyncio.gather(
+                *(leases.try_acquire(f"r{round_number}", owner=f"o{i}", ttl=timedelta(seconds=5)) for i in range(16))
+            )
+            assert sum(1 for r in results if r is not None) == 1
+
+
+async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPersistence) -> None:
+    leases = persistence.leases()
+    entered = asyncio.Event()
+
+    async def hold() -> None:
+        async with leases.acquire("r", owner="o", ttl=timedelta(seconds=30)):
+            entered.set()
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(hold())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await leases.try_acquire("r", owner="other", ttl=timedelta(seconds=1)) is not None
+
+
+async def _cancel_while_holding(leases: PostgresLeases, resource: str) -> float:
+    """Cancel a task inside ``acquire`` and return how long the cancellation took to arrive."""
+    entered = asyncio.Event()
+
+    async def hold() -> None:
+        async with leases.acquire(resource, owner="o", ttl=timedelta(seconds=30)):
+            entered.set()
+            await asyncio.sleep(60)
+
+    task = asyncio.create_task(hold())
+    await entered.wait()
+    started = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    return time.monotonic() - started
+
+
+async def test_a_slow_release_holds_a_cancelled_task_only_for_the_bound(
+    leases: PostgresLeases, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    async def slow_release(self: Lease) -> None:
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(_leases, "_RELEASE_SECONDS", 0.2)
+    monkeypatch.setattr(Lease, "release", slow_release)
+    with caplog.at_level(logging.WARNING):
+        elapsed = await _cancel_while_holding(leases, "threads/slow")
+        assert elapsed < 0.5
+        assert any("did not finish" in r.getMessage() for r in caplog.records if r.name == _leases.__name__)
+        await asyncio.sleep(1)
+
+
+@pytest.mark.parametrize(("bound", "warnings"), [(5.0, 1), (0.1, 2)], ids=["within-bound", "after-bound"])
+async def test_a_failing_release_logs_only_through_the_package_logger(
+    leases: PostgresLeases,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    bound: float,
+    warnings: int,
+) -> None:
+    async def failing_release(self: Lease) -> None:
+        await asyncio.sleep(0.3)
+        raise RuntimeError("release failed")
+
+    monkeypatch.setattr(_leases, "_RELEASE_SECONDS", bound)
+    monkeypatch.setattr(Lease, "release", failing_release)
+    with caplog.at_level(logging.WARNING):
+        await _cancel_while_holding(leases, "threads/failing")
+        await asyncio.sleep(0.5)
+    assert not [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR]
+    package = [r for r in caplog.records if r.name == _leases.__name__ and r.levelno == logging.WARNING]
+    assert len(package) == warnings
+    assert sum("Could not release" in r.getMessage() for r in package) == 1

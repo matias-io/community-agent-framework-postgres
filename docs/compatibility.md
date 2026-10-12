@@ -4,63 +4,66 @@
 
 | Package | `agent-framework-core` | `agent-framework-ag-ui` (`ag-ui` extra) | Python | PostgreSQL | psycopg |
 |---|---|---|---|---|---|
-| 0.1.1 | Declared `>=1.19.0,<2`; tested on 1.19.x and 1.20.x | Declared `>=1.4.0,<2`; tested on 1.4.x and 1.5.x | 3.11 to 3.14 (3.15.0b4 smoke-tested, not supported yet) | 16, 17 | 3.3.5 or later, below 4 (`>=3.3.5,<4`) |
-| 0.1.0 | Declared `>=1.19.0,<2`; tested on 1.19.0 only | Declared `>=1.4.0,<2` | 3.11 to 3.14 | 16, 17 | 3.3.5 or later, below 4 (`>=3.3.5,<4`) |
+| 0.1.1 | Declared `>=1.20.0,<2`; tested on 1.20.0 and 1.21.0 | Declared `>=1.5.0,<2`; tested on 1.5.0 and 1.5.1 | 3.11 to 3.14 | 16, 17 | Declared `>=3.3.5,<4`; tested on 3.3.6 |
 
-0.1.0 is the unpublished snapshot at commit `50c91c5`, with a local tag that must not be pushed. 0.1.1 supersedes it and is intended as the first PyPI release.
+0.1.1 is the first release on PyPI. 0.1.0 was never published.
 
 The `azure` extra installs `azure-identity>=1.19,<2` and `aiohttp>=3.9,<4` for [Microsoft Entra ID sign-in](azure-entra.md).
 
-Python 3.15 is not supported yet. The samples and the test suite passed on 3.15.0b4 with `agent-framework-core` 1.20.0, but only a beta was tested, so the package does not claim it.
+Python 3.15 is not supported yet: 0.1.1 was not tested on it.
 
 ## Support policy
 
 The package declares two ranges and tests a narrower one.
 
-- **Declared**: `agent-framework-core>=1.19.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.4.0,<2`. pip and uv enforce these.
-- **Tested**: `agent-framework-core` 1.19.x and 1.20.x, `agent-framework-ag-ui` 1.4.x and 1.5.x. The lock file keeps 1.19.0 and 1.4.0, the lowest supported versions, and CI also runs the suite on the newest release the declared range allows.
+- **Declared**: `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. pip and uv enforce these.
+- **Tested**: `agent-framework-core` 1.20.0 and 1.21.0, with `agent-framework-ag-ui` 1.5.0 and 1.5.1. The lock file pins 1.20.0 and 1.5.0, the lowest supported versions, and CI also runs the suite on the newest release the declared range allows.
 
-The declared range assumes Agent Framework follows semantic versioning and keeps breaking changes for major versions. Microsoft's own integrations make the same assumption: `agent-framework-azure-cosmos` and `agent-framework-redis` declare `agent-framework-core>=1.19.0,<2`. Microsoft releases those packages in lockstep with MAF. This package cannot, and MAF ships a minor every one to two weeks, so a range that listed only tested minors would block every new MAF release until a patch release here caught up. Instead, a weekly canary workflow runs the suite against the newest MAF release, and each minor that passes is added to the tested range in the next release.
+The declared range assumes Agent Framework follows semantic versioning and keeps breaking changes for major versions. Microsoft's own integrations make the same assumption: `agent-framework-azure-cosmos` and `agent-framework-redis` declare `agent-framework-core>=1.19.0,<2`. This package starts at 1.20 instead, for the reason under [Behaviour MAF owns](#behaviour-maf-owns). Microsoft releases its packages in lockstep with MAF. This package cannot, and MAF ships a minor every one to two weeks, so a range that listed only tested minors would block every new MAF release until a patch release here caught up. Instead, a weekly canary workflow runs the suite against the newest MAF release, and each minor that passes is added to the tested range in the next release.
 
-### The untested-version warning
+### The compatibility check
 
-When the installed `agent-framework-core`, or `agent-framework-ag-ui` if installed, is a newer major.minor than the newest tested one, importing the package emits one `UntestedAgentFrameworkWarning` naming the installed and tested versions. Older and tested versions never warn. Pre-release and local version parts are ignored: only the numeric major.minor is compared.
-
-The warning means the combination has not been run here, not that it is known to fail. It is expected to work. The warning fires while the package is imported, so a filter has to be in place before the first import, and it matches the message, which always starts with `community-agent-framework-postgres has not been tested`:
+`compatibility()` returns a `Compatibility` with the installed and tested versions. `core_installed` and `core_tested` cover `agent-framework-core`, and `ag_ui_installed` and `ag_ui_tested` cover `agent-framework-ag-ui`; `ag_ui_installed` is `None` when the `ag-ui` extra is not installed. `untested` names each distribution whose installed major.minor is newer than the newest tested one, and `out_of_range` names each one whose major is newer than the tested major. Both are empty when every installed version is covered. Older and tested versions are never untested. Pre-release and local version parts are ignored: only the numeric major.minor is compared.
 
 ```python
-import warnings
+from agent_framework_community_postgres import compatibility
 
-warnings.filterwarnings("ignore", message="community-agent-framework-postgres has not been tested")
-
-import agent_framework_community_postgres  # noqa: E402
+report = compatibility()
+print(report.core_installed, report.core_tested, report.untested)
 ```
 
-From the environment:
+The first store or `PostgresPersistence` built in a process logs one warning for each untested distribution on the `agent_framework_community_postgres` logger, naming the installed and tested versions. Later stores log nothing. The check logs through `logging` and never calls `warnings.warn`, and the package itself emits no warning or log line at import, so `python -W error` and a pytest `filterwarnings = ["error"]` are unaffected by the compatibility check.
 
-```bash
-PYTHONWARNINGS="ignore:community-agent-framework-postgres has not been tested" python app.py
+To silence the compatibility warning without hiding the package's other log lines, filter it on that logger rather than raising the logger's level:
+
+```python
+import logging
+
+untested = "community-agent-framework-postgres has not been tested"
+logging.getLogger("agent_framework_community_postgres").addFilter(lambda r: not r.getMessage().startswith(untested))
 ```
 
-In pytest, add `"ignore:community-agent-framework-postgres has not been tested"` to `filterwarnings`, or pass it with `-W`. Once the package is imported, the category is `agent_framework_community_postgres.UntestedAgentFrameworkWarning`, and `warnings.filterwarnings("ignore", category=UntestedAgentFrameworkWarning)` silences any later check, for example after `importlib.reload`.
+For a newer minor, the warning means the combination has not been run here, not that it is known to fail, and it is expected to work. For a new major, which pip and uv only install when forced, the warning says it is outside the declared range and likely to break.
 
 ### If a newer MAF breaks something
 
-Pin the last tested minor, for example `agent-framework-core<1.21`, and open an issue at <https://github.com/matias-io/community-agent-framework-postgres/issues> with the MAF version and the error. A fix ships in a patch release.
+Pin the last tested minor, for example `agent-framework-core<1.22`, and open an issue at <https://github.com/matias-io/community-agent-framework-postgres/issues> with the MAF version and the error. A fix ships in a patch release.
 
 ### Behaviour MAF owns
 
-Behaviour that MAF owns follows the installed MAF version. `PostgresHistoryProvider` drops replayed messages with MAF's own `filter_new_messages`, so the replay rule is MAF's. In 1.20 that rule changed: when the stored history is exactly one user message without an id, an incoming batch that starts with that same message is kept as a repeated input instead of being dropped as a replay. On 1.19 the repeat is dropped; on 1.20 it is stored.
+Behaviour that MAF owns follows the installed MAF version. `PostgresHistoryProvider` drops replayed messages with MAF's own `filter_new_messages`, so the replay rule is MAF's. Since 1.20 it drops only a replayed overlap between the stored history and the incoming batch, and a message the user repeats, such as a second "yes", is stored.
+
+MAF 1.19 also dropped any incoming message whose role and content matched a message stored anywhere earlier in the session, so a repeated "yes" was lost. Microsoft's Cosmos DB and Redis history providers use the same function and behave the same way on 1.19. That is why this package requires 1.20.
 
 ## Private Agent Framework imports
 
-MAF does not export the three names below, from two private modules. Microsoft's own Cosmos DB and Redis packages import the same names from the same modules. This package imports them in `src/agent_framework_community_postgres/_framework.py` and nowhere else.
+MAF does not export the three names below, from two private modules. Microsoft's own Cosmos DB package imports all three from the same modules, and its Redis package imports `filter_new_messages`. This package imports them in `src/agent_framework_community_postgres/_framework.py` and nowhere else.
 
 | Name | Module | Used for | Verified on |
 |---|---|---|---|
-| `filter_new_messages` | `agent_framework._sessions` | Dropping replayed messages in `PostgresHistoryProvider` | `agent-framework-core` 1.19.0, 1.20.0 |
-| `encode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Encoding checkpoints in `PostgresCheckpointStorage` | `agent-framework-core` 1.19.0, 1.20.0 |
-| `decode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Decoding checkpoints and the save-time restore check | `agent-framework-core` 1.19.0, 1.20.0 |
+| `filter_new_messages` | `agent_framework._sessions` | Dropping replayed messages in `PostgresHistoryProvider` | `agent-framework-core` 1.20.0 and 1.21.0 |
+| `encode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Encoding checkpoints in `PostgresCheckpointStorage` | `agent-framework-core` 1.20.0 and 1.21.0 |
+| `decode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Decoding checkpoints and the save-time restore check | `agent-framework-core` 1.20.0 and 1.21.0 |
 
 `tests/unit/test_framework.py` guards all three. It checks the names exist, that the checkpoint encoding round-trips `datetime` and `UUID` values, and that `filter_new_messages` drops a replayed prefix. If an upstream release removes a name, importing the package raises `ImportError` naming the installed `agent-framework-core` version, the declared range and the tested minors, and asking you to pin an earlier version and open an issue. CI runs the suite a second time against the newest `agent-framework-core` the declared range allows, and that job blocks a merge. The weekly canary runs it against the newest MAF release, so a rename in a new MAF minor shows up there first.
 
@@ -73,7 +76,7 @@ Every payload is stored as PostgreSQL `jsonb`, which changes a few values.
 - A float of about `1e16` or more comes back as an `int`.
 - `-0.0` comes back as `0.0`.
 - `nan` and infinity are not JSON. Every store refuses them with `ValueError` before any SQL runs, as it does a circular reference or any value `json` cannot encode.
-- These errors name the field, for example `Document payload`, and the Python error type. They never quote the value.
+- These errors name the field, for example `Session state`, and the Python error type. They never quote the value.
 
 Ordinary strings, integers, floats, booleans, lists and objects round-trip exactly.
 

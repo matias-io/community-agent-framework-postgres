@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 import pytest
@@ -68,3 +68,20 @@ async def persistence(test_dsn: str, schema: str) -> AsyncIterator[PostgresPersi
     async with PostgresPersistence(application_id="tests", connection_string=test_dsn, schema=schema) as hub:
         await hub.migrate()
         yield hub
+
+
+@pytest.fixture
+def expire(client: ClientHandle, names: TableNames) -> Callable[[str], Awaitable[None]]:
+    """Move the expiry of every expiring row of one ``tests`` table into the past, instead of sleeping."""
+
+    async def run(table: str) -> None:
+        async with client.connection() as connection:
+            await connection.execute(
+                sql.SQL(
+                    "UPDATE {t} SET expires_at = now() - interval '1 minute'"
+                    " WHERE application_id = %(app)s AND expires_at IS NOT NULL"
+                ).format(t=names.table(table)),
+                {"app": "tests"},
+            )
+
+    return run
