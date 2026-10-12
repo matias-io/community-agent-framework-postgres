@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       # --locked fails the job when uv.lock no longer matches pyproject.toml, instead of re-locking silently.
       - run: uv sync --locked --all-extras
       - run: uv run ruff check .
@@ -50,7 +50,7 @@ jobs:
       POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: ${{ matrix.python }}
       - run: uv sync --locked --all-extras
