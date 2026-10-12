@@ -63,7 +63,7 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 
 1. Write a function that takes `TableNames` and returns its statements, and append it to `MIGRATIONS` in `_migrations.py`. Its version is its position plus one.
 2. Never edit a migration that has shipped in a release. Fix it with a new one. Nothing shipped before 0.1.1, so its version 1 is the first.
-3. If the migration adds a table or index name longer than `history_messages_session_idx`, set `_LONGEST_IDENTIFIER` in `_client.py` to it, so `TableNames` still rejects a prefix that would push a name past 63 bytes.
+3. If the migration adds a table or index name longer than `history_messages_session_expiry_idx`, set `_LONGEST_IDENTIFIER` in `_client.py` to it, so `TableNames` still rejects a prefix that would push a name past 63 bytes.
 4. Add a test to `tests/integration/test_migrations.py`.
 
 ## Add a store
