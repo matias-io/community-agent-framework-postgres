@@ -205,10 +205,12 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
                     [params | {"message": encoded[id(message)], "ttl": self._ttl()} for message in new_messages],
                 )
             if self.max_messages is not None:
+                # The subquery finds the newest message past the limit; it is NULL, and nothing is
+                # deleted, while the session is within the limit.
                 await connection.execute(
                     sql.SQL(
-                        "DELETE FROM {history} WHERE {scope} AND id NOT IN"
-                        " (SELECT id FROM {history} WHERE {scope} ORDER BY id DESC LIMIT %(keep)s)"
+                        "DELETE FROM {history} WHERE {scope} AND id <="
+                        " (SELECT id FROM {history} WHERE {scope} ORDER BY id DESC OFFSET %(keep)s LIMIT 1)"
                     ).format(history=history, scope=self._SCOPE),
                     params | {"keep": self.max_messages},
                 )
@@ -230,15 +232,22 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
 
     async def list_sessions(self, *, limit: int | None = None, after: str | None = None) -> list[str]:
         """Session ids with stored history under this provider's scope, sorted; page with ``limit`` and ``after``."""
+        # One index probe per distinct session (a skip scan), instead of reading every message of every
+        # session on the page; the recursion stops once the outer LIMIT has its rows. The rows come out in
+        # recursion order, which is sorted; an outer ORDER BY would read the whole scope before the LIMIT.
         async with self._client.connection(transactional=False) as connection:
             cursor = await connection.execute(
                 sql.SQL(
-                    "SELECT DISTINCT session_id FROM {history}"
-                    " WHERE application_id = %(app)s AND tenant_id = %(tenant)s AND agent_id = %(agent)s"
-                    " AND source_id = %(source)s AND (%(after)s::text IS NULL OR session_id > %(after)s)"
-                    " ORDER BY session_id LIMIT %(limit)s"
-                ).format(history=self._names.table("history_messages")),
-                self._scope_params() | {"after": after, "limit": limit},
+                    "WITH RECURSIVE ids(session_id) AS ("
+                    " (SELECT session_id FROM {history} WHERE {scope} AND session_id > %(after)s"
+                    " ORDER BY session_id LIMIT 1)"
+                    " UNION ALL"
+                    " SELECT (SELECT h.session_id FROM {history} h WHERE {scope} AND h.session_id > ids.session_id"
+                    " ORDER BY h.session_id LIMIT 1) FROM ids WHERE ids.session_id IS NOT NULL)"
+                    " SELECT session_id FROM ids WHERE session_id IS NOT NULL LIMIT %(limit)s"
+                ).format(history=self._names.table("history_messages"), scope=self._SESSIONS_SCOPE),
+                # Session ids are never empty, so '' sorts before every one of them.
+                self._scope_params() | {"after": "" if after is None else after, "limit": limit},
             )
             return [row[0] for row in await cursor.fetchall()]
 
