@@ -9,14 +9,23 @@ from typing import Any, ClassVar, cast
 from agent_framework import HistoryProvider, Message, SecretString
 from psycopg import AsyncConnection, sql
 
-from ._client import ClientHandle, PostgresClient, PostgresStorageError, optional_text, require_text
+from ._client import ClientHandle, PostgresClient, PostgresStorageError, TableNames, optional_text, require_text
 from ._entra import EntraCredential
 from ._framework import filter_new_messages
 from ._json import encode_jsonb
-from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy, purge_rows
+from ._retention import EXPIRES_AT, PurgeReport, RetentionPolicy
 from ._store import BaseStore
 
 logger = logging.getLogger(__name__)
+
+
+def _session_lock_key(
+    tenant: sql.Composable, agent: sql.Composable, source: sql.Composable, session: sql.Composable
+) -> sql.Composed:
+    """The advisory lock key of one session's history; saves, ``clear`` and the purge all take it."""
+    return sql.SQL(
+        "hashtextextended(concat_ws(chr(31), %(schema)s::text, %(prefix)s::text, %(app)s::text, {}, {}, {}, {}), 0)"
+    ).format(tenant, agent, source, session)
 
 
 class PostgresHistoryProvider(HistoryProvider, BaseStore):
@@ -145,9 +154,13 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
                 "A stored message in this session no longer deserializes; clear the session or repair the row."
             ) from exc
 
-    _LOCK = sql.SQL(
-        "SELECT pg_advisory_xact_lock(hashtextextended(concat_ws(chr(31), %(schema)s::text, %(prefix)s::text,"
-        " %(app)s::text, %(tenant)s::text, %(agent)s::text, %(source)s::text, %(session)s::text), 0))"
+    _LOCK = sql.SQL("SELECT pg_advisory_xact_lock({})").format(
+        _session_lock_key(
+            sql.SQL("%(tenant)s::text"),
+            sql.SQL("%(agent)s::text"),
+            sql.SQL("%(source)s::text"),
+            sql.SQL("%(session)s::text"),
+        )
     )
 
     def _lock_params(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -229,33 +242,116 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             )
             return [row[0] for row in await cursor.fetchall()]
 
+    _SESSIONS_SCOPE = sql.SQL(
+        "application_id = %(app)s AND tenant_id = %(tenant)s AND agent_id = %(agent)s AND source_id = %(source)s"
+    )
+
     async def purge(self) -> PurgeReport:
         """Delete the messages of sessions whose every message has expired, whatever policy stamped them."""
-        history = self._names.table("history_messages")
-        count = await purge_rows(
+        count = await purge_history(
             self._client,
-            table=history,
-            where=sql.SQL(
-                "c.tenant_id = %(tenant)s AND c.agent_id = %(agent)s AND c.source_id = %(source)s AND {whole}"
-            ).format(whole=whole_session_expired(history)),
-            params=self._scope_params(),
-            mode="delete",
-            tombstone=None,
+            self._names,
+            application_id=self.application_id,
+            scope={"tenant": self.tenant_id, "agent": self.agent_id, "source": self.source_id},
         )
         return PurgeReport({f"{self._names.prefix}history_messages": count})
 
 
-def whole_session_expired(history: sql.Identifier) -> sql.Composable:
-    """Purge predicate on the candidate row ``c``: no message of its session is still live.
+# Session keys passed as four parallel text arrays, one set for the sessions to delete and one for those to skip.
+_KEYS = sql.SQL(
+    "unnest(%(tenants)s::text[], %(agents)s::text[], %(sources)s::text[], %(sessions)s::text[]) AS k(t, a, s, sess)"
+)
+_SKIPPED_KEYS = sql.SQL(
+    "unnest(%(skip_tenants)s::text[], %(skip_agents)s::text[], %(skip_sources)s::text[], %(skip_sessions)s::text[])"
+    " AS k(t, a, s, sess)"
+)
 
-    A session's rows are deleted only when no row of the session is still live; a row written while
-    ``ttl`` was ``None`` has no expiry and keeps its whole session. A conversation that goes on
-    never loses its head, and a tool call never loses its result. Nothing is rewritten on save; the
-    rule is applied at purge time.
-    """
+
+def _no_live_message(history: sql.Identifier, row: str) -> sql.Composed:
+    """No message of ``row``'s session is still live: none has an expiry still ahead, or no expiry at all."""
     return sql.SQL(
-        "c.application_id = %(app)s AND NOT EXISTS (SELECT 1 FROM {history} live"
-        " WHERE live.application_id = c.application_id AND live.tenant_id = c.tenant_id"
-        " AND live.agent_id = c.agent_id AND live.source_id = c.source_id AND live.session_id = c.session_id"
-        " AND (live.expires_at IS NULL OR live.expires_at >= now()))"
-    ).format(history=history)
+        "NOT EXISTS (SELECT 1 FROM {history} live"
+        " WHERE live.application_id = {row}.application_id AND live.tenant_id = {row}.tenant_id"
+        " AND live.agent_id = {row}.agent_id AND live.source_id = {row}.source_id"
+        " AND live.session_id = {row}.session_id AND (live.expires_at IS NULL OR live.expires_at >= now()))"
+    ).format(history=history, row=sql.Identifier(row))
+
+
+def _key_arrays(prefix: str, keys: Sequence[tuple[str, str, str, str]]) -> dict[str, list[str]]:
+    return {
+        f"{prefix}tenants": [key[0] for key in keys],
+        f"{prefix}agents": [key[1] for key in keys],
+        f"{prefix}sources": [key[2] for key in keys],
+        f"{prefix}sessions": [key[3] for key in keys],
+    }
+
+
+async def purge_history(
+    client: ClientHandle,
+    names: TableNames,
+    *,
+    application_id: str,
+    scope: Mapping[str, str] | None = None,
+    batch_size: int = 1000,
+) -> int:
+    """Delete every message of each session whose messages have all expired; return the count.
+
+    A session is deleted whole or not at all: a row written while ``ttl`` was ``None`` has no expiry
+    and keeps its session, so a conversation that goes on never loses its head and a tool call never
+    loses its result. Each transaction finds the sessions of up to ``batch_size`` expired messages
+    whose sessions have no live message, tries those sessions' save locks, and deletes the sessions it
+    locked, checking again in a statement that starts after the lock, so a save that committed
+    meanwhile keeps its session. A session another writer holds is skipped for the rest of this
+    purge; a later purge takes it. ``scope`` (``tenant``, ``agent``, ``source``) limits the purge to
+    one provider's rows; without it the whole application is purged.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1.")
+    history = names.table("history_messages")
+    params: dict[str, Any] = {
+        "app": application_id,
+        "schema": names.schema,
+        "prefix": names.prefix,
+        "batch": batch_size,
+    }
+    narrow = sql.SQL("")
+    if scope is not None:
+        narrow = sql.SQL(" AND c.tenant_id = %(tenant)s AND c.agent_id = %(agent)s AND c.source_id = %(source)s")
+        params |= dict(scope)
+    # Finding the sessions and trying their locks is one statement; the delete runs after it, so its own
+    # liveness check sees every save that committed before the lock was taken.
+    find_and_lock = sql.SQL(
+        "SELECT d.tenant_id, d.agent_id, d.source_id, d.session_id, pg_try_advisory_xact_lock({key})"
+        " FROM (SELECT DISTINCT c.tenant_id, c.agent_id, c.source_id, c.session_id FROM"
+        " (SELECT c.tenant_id, c.agent_id, c.source_id, c.session_id FROM {history} c"
+        " WHERE c.application_id = %(app)s{narrow} AND c.expires_at < now() AND {no_live}"
+        " AND (c.tenant_id, c.agent_id, c.source_id, c.session_id) NOT IN (SELECT k.t, k.a, k.s, k.sess FROM {skipped})"
+        " LIMIT %(batch)s) c) d"
+    ).format(
+        key=_session_lock_key(
+            sql.SQL("d.tenant_id"), sql.SQL("d.agent_id"), sql.SQL("d.source_id"), sql.SQL("d.session_id")
+        ),
+        history=history,
+        narrow=narrow,
+        no_live=_no_live_message(history, "c"),
+        skipped=_SKIPPED_KEYS,
+    )
+    delete = sql.SQL(
+        "DELETE FROM {history} h USING {keys} WHERE h.application_id = %(app)s AND h.tenant_id = k.t"
+        " AND h.agent_id = k.a AND h.source_id = k.s AND h.session_id = k.sess AND {no_live}"
+    ).format(history=history, keys=_KEYS, no_live=_no_live_message(history, "h"))
+
+    skipped: list[tuple[str, str, str, str]] = []
+    total = 0
+    while True:
+        async with client.connection(read_committed=True) as connection:
+            cursor = await connection.execute(find_and_lock, params | _key_arrays("skip_", skipped))
+            found = await cursor.fetchall()
+            locked = [(row[0], row[1], row[2], row[3]) for row in found if row[4]]
+            # Every round deletes or skips each session it found, so the loop ends once none is left.
+            skipped.extend((row[0], row[1], row[2], row[3]) for row in found if not row[4])
+            if locked:
+                cursor = await connection.execute(delete, params | _key_arrays("", locked))
+                total += cursor.rowcount
+        if not found:
+            return total
