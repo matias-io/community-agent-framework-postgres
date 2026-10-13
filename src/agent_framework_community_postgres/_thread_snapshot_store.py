@@ -81,7 +81,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
             "interrupt": self._jsonb(snapshot.interrupt, "Thread snapshot interrupt"),
             "session_state": self._jsonb(snapshot.session_state, "Thread snapshot session state"),
         }
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(
                 sql.SQL(
                     "INSERT INTO {snapshots} (application_id, scope, thread_id, messages, state, interrupt,"
@@ -120,7 +120,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
 
         A purged row is removed too, and returns ``False``.
         """
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL("DELETE FROM {snapshots} WHERE {key} RETURNING purged_at IS NULL").format(
                     snapshots=self._names.table("thread_snapshots"), key=self._KEY
@@ -141,7 +141,7 @@ class PostgresAGUIThreadSnapshotStore(BaseStore):
         else:
             query = sql.SQL("DELETE FROM {snapshots} WHERE application_id = %(app)s AND scope = %(scope)s")
             params = {"app": self.application_id, "scope": require_text(scope, "scope")}
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(query.format(snapshots=self._names.table("thread_snapshots")), params)
 
     async def purge(self) -> PurgeReport:

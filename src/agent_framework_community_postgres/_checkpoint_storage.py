@@ -120,7 +120,7 @@ class PostgresCheckpointStorage(BaseStore):
                 "A checkpoint cannot be encoded or restored under this storage's allowed types."
             ) from exc
         payload = encode_jsonb(encoded, what="Checkpoint")
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             # Writers of one scope take turns, so sequence order is commit order.
             await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (self._lock_key,))
             await connection.execute(
@@ -196,7 +196,7 @@ class PostgresCheckpointStorage(BaseStore):
 
     async def delete(self, checkpoint_id: str) -> bool:
         """Delete by id within this store's scope; ``True`` when a row existed."""
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL("DELETE FROM {checkpoints} WHERE {scope} AND checkpoint_id = %(id)s").format(
                     checkpoints=self._names.table("checkpoints"), scope=self._SCOPE

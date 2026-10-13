@@ -151,7 +151,9 @@ async def purge_rows(
     )
     total = 0
     while True:
-        async with client.connection() as connection:
+        # READ COMMITTED: under a REPEATABLE READ default, SKIP LOCKED on a row changed after the snapshot
+        # would raise a serialization failure instead of skipping it.
+        async with client.connection(read_committed=True) as connection:
             cursor = await connection.execute(composed, dict(params) | {"batch": batch_size})
             count = cursor.rowcount
         total += count
