@@ -182,3 +182,13 @@ async def test_a_read_on_a_borrowed_non_autocommit_connection_leaves_no_transact
                 sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_sessions"))
             )
             assert await cursor.fetchone() == (1,)
+
+
+async def test_a_dead_borrowed_connection_is_not_retryable(test_dsn: str) -> None:
+    connection = await AsyncConnection.connect(test_dsn, autocommit=True)
+    client = ClientHandle(None, connection)
+    await connection.close()
+    with pytest.raises(PostgresStorageError) as info:
+        async with client.connection(transactional=False) as borrowed:
+            await borrowed.execute("SELECT 1")
+    assert info.value.retryable is False

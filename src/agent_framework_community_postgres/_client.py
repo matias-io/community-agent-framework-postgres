@@ -331,6 +331,9 @@ class ClientHandle:
             retryable = is_retryable(sqlstate) or (
                 sqlstate is None and isinstance(exc, OperationalError) and not isinstance(exc, PoolClosed)
             )
+            if isinstance(self.client, AsyncConnection) and self.client.closed:
+                # A retry would get the same dead connection; only a pool hands out a fresh one.
+                retryable = False
             raise PostgresStorageError(
                 "PostgreSQL operation failed; see the chained driver exception.", sqlstate=sqlstate, retryable=retryable
             ) from exc
