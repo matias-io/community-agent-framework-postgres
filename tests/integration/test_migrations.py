@@ -118,3 +118,13 @@ async def test_migration_ddl_runs_under_a_lock_timeout(
         await blocker.rollback()
         await blocker.close()
     assert await current_version(client, names) == 1
+
+
+async def test_migrating_inside_a_caller_transaction_keeps_its_lock_timeout(test_dsn: str, names: TableNames) -> None:
+    async with await AsyncConnection.connect(test_dsn) as connection:
+        await connection.execute("SET LOCAL lock_timeout = '7s'")
+        report = await migrate(ClientHandle(None, connection), names)
+        assert report.applied == (1,)
+        cursor = await connection.execute("SELECT current_setting('lock_timeout')")
+        assert await cursor.fetchone() == ("7s",)
+        await connection.rollback()
