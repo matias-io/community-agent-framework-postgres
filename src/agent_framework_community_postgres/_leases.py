@@ -109,10 +109,10 @@ class PostgresLeases(BaseStore):
             cursor = await connection.execute(
                 sql.SQL(
                     "INSERT INTO {leases} (application_id, resource, owner, token, expires_at)"
-                    " VALUES (%(app)s, %(resource)s, %(owner)s, %(token)s, now() + %(ttl)s)"
+                    " VALUES (%(app)s, %(resource)s, %(owner)s, %(token)s, statement_timestamp() + %(ttl)s)"
                     " ON CONFLICT (application_id, resource) DO UPDATE"
                     " SET owner = EXCLUDED.owner, token = EXCLUDED.token, expires_at = EXCLUDED.expires_at"
-                    " WHERE {leases}.expires_at < now()"
+                    " WHERE {leases}.expires_at < statement_timestamp()"
                     " RETURNING token"
                 ).format(leases=self._names.table("leases")),
                 {"app": self.application_id, "resource": resource, "owner": owner, "token": token, "ttl": ttl},
@@ -175,9 +175,9 @@ class PostgresLeases(BaseStore):
         async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL(
-                    "UPDATE {leases} SET expires_at = now() + %(ttl)s"
+                    "UPDATE {leases} SET expires_at = statement_timestamp() + %(ttl)s"
                     " WHERE application_id = %(app)s AND resource = %(resource)s AND owner = %(owner)s"
-                    " AND token = %(token)s AND expires_at >= now() RETURNING owner"
+                    " AND token = %(token)s AND expires_at >= statement_timestamp() RETURNING owner"
                 ).format(leases=self._names.table("leases")),
                 self._lease_params(lease) | {"ttl": lease.ttl},
             )

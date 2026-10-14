@@ -12,7 +12,7 @@ A lease serializes work on one resource across replicas. MAF hosting serializes 
 PostgresLeases(*, application_id, ...)
 ```
 
-`application_id` is required. The connection arguments are the same on every store. See [Standalone use](../README.md#standalone-use). On the hub, call `hub.leases()`.
+`application_id` is required. The connection arguments are the same on every store. See [connections.md](connections.md). On the hub, call `hub.leases()`.
 
 ## Acquiring
 
@@ -28,8 +28,8 @@ After a block that raised or was cancelled, the release waits at most 5 seconds.
 - With `wait=0`, a lease that is held raises `LeaseUnavailable` at once. With a longer `wait`, `acquire` retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
 - `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another acquisition took it.
 - Releasing a lease you no longer hold does nothing.
-- Leases use plain rows, not advisory locks, so they never hold a connection during your work. Behind a transaction-mode pooler such as PgBouncer, pass a pool with `prepare_threshold=None`. See [Standalone use](../README.md#standalone-use).
-- Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
+- Leases use plain rows, not advisory locks, so they never hold a connection during your work. Behind a transaction-mode pooler such as PgBouncer, pass a pool with `prepare_threshold=None`. See [connections.md](connections.md).
+- Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Lease statements read the clock when each statement starts, not when the transaction did, so a `renew` inside a transaction you opened yourself still extends the lease from the current time. Other connections see the change only when your transaction commits.
 
 `LeaseUnavailable` and `LeaseLost` carry the resource name as `resource` and never put it in the message, because a resource name often contains a user or visitor id.
 
