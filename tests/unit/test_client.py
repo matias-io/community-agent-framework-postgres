@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import pytest
@@ -276,3 +277,16 @@ async def test_stores_and_the_hub_take_pool_kwargs() -> None:
     with pytest.raises(TypeError, match="unexpected keyword argument 'pool_kwargs'"):
         hub.session_store(pool_kwargs={"max_size": 5})
     await hub.close()
+
+
+@pytest.mark.parametrize(("mode", "unchecked"), [("require", "certificate"), ("verify-ca", "host name")])
+def test_an_unverified_sslmode_with_a_credential_logs_a_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str, unchecked: str
+) -> None:
+    monkeypatch.delenv("PGSSLMODE", raising=False)
+    with caplog.at_level(logging.WARNING, logger="agent_framework_community_postgres._client"):
+        ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_Credential())  # type: ignore[arg-type]
+        ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_Credential())  # type: ignore[arg-type]
+        ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None)  # no credential: nothing to protect
+    [record] = [r for r in caplog.records if r.name == "agent_framework_community_postgres._client"]
+    assert f"sslmode={mode}" in record.getMessage() and unchecked in record.getMessage()
