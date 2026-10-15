@@ -273,6 +273,6 @@ async def test_stores_and_the_hub_take_pool_kwargs() -> None:
         await store.close()
     hub = PostgresPersistence(application_id="tests", connection_string=dsn, pool_kwargs={"max_size": 4})
     assert isinstance(hub.pool, AsyncConnectionPool) and hub.pool.max_size == 4
-    with pytest.raises(TypeError, match="pool_kwargs is set by the hub"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'pool_kwargs'"):
         hub.session_store(pool_kwargs={"max_size": 5})
     await hub.close()

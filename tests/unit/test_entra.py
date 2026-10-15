@@ -389,7 +389,7 @@ async def test_the_hub_shares_its_signed_in_pool() -> None:
         assert isinstance(hub.pool, AsyncConnectionPool)
         assert hub.pool.connection_class is not AsyncConnection
         assert hub.history_provider()._client.client is hub.pool  # pyright: ignore[reportPrivateUsage]
-        with pytest.raises(TypeError, match="credential is set by the hub"):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'credential'"):
             hub.session_store(credential=SyncCredential())
     finally:
         await hub.close()

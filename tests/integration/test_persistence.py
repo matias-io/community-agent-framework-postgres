@@ -63,7 +63,7 @@ async def test_closing_a_never_opened_hub_stops_its_stores(test_dsn: str, schema
         await pool.close()
 
 
-@pytest.mark.parametrize("key", ["application_id", "client", "credential", "schema", "table_prefix"])
+@pytest.mark.parametrize("key", ["application_id", "client", "credential", "pool_kwargs", "schema", "table_prefix"])
 @pytest.mark.parametrize(
     "factory", ["history_provider", "session_store", "checkpoint_storage", "thread_snapshot_store"]
 )
@@ -71,7 +71,7 @@ async def test_factories_reject_overriding_hub_owned_arguments(key: str, factory
     persistence = PostgresPersistence(application_id="tests", connection_string="host=h")
     arguments = {key: "other"}
     try:
-        with pytest.raises(TypeError, match=f"{key} is set by the hub and cannot be overridden"):
+        with pytest.raises(TypeError, match=f"unexpected keyword argument '{key}'"):
             getattr(persistence, factory)(**arguments)
     finally:
         await persistence.close()
