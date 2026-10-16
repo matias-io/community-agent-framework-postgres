@@ -6,3 +6,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Security and maintenance updates for the locked development environment. The lock pins the lowest
+  # supported MAF on purpose (CI's "latest" leg tests the newest), so the two MAF packages are left alone.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: agent-framework-core
+      - dependency-name: agent-framework-ag-ui

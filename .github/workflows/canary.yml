@@ -31,9 +31,11 @@ jobs:
       POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          python-version: "3.14"
+          python-version: "3.15"
       - run: uv sync --all-extras
       # uv pip install does not re-check the bounds this package declares, so it
       # installs the newest MAF even when a 2.0 release is outside them.
