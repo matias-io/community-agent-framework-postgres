@@ -4,6 +4,7 @@ import time
 import pytest
 from agent_framework import AgentSession, SecretString
 from psycopg import AsyncConnection, sql
+from psycopg.conninfo import make_conninfo
 from psycopg.errors import UndefinedTable
 from psycopg.pq import TransactionStatus
 from psycopg_pool import AsyncConnectionPool, PoolClosed
@@ -69,10 +70,7 @@ async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None
         assert not connection.closed
 
 
-_UNREACHABLE = [
-    "postgresql://postgres:wrong@127.0.0.1:5433/agent_framework",
-    "host=127.0.0.1 port=1 dbname=x",
-]
+_CLOSED_PORT = "host=127.0.0.1 port=1 dbname=x"
 _CLEAR = (
     "No PostgreSQL connection became available within 10 seconds: the database is unreachable or every pooled"
     " connection is busy; psycopg_pool logs the driver's reason."
@@ -89,8 +87,13 @@ async def _fail_once(handle: ClientHandle) -> None:
 
 
 @pytest.mark.timeout(40)
-@pytest.mark.parametrize("dsn", _UNREACHABLE)
-async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
+@pytest.mark.parametrize("unreachable", ["wrong-password", "closed-port"])
+async def test_unreachable_database_fails_fast_on_every_call(unreachable: str, request: pytest.FixtureRequest) -> None:
+    # The wrong password goes to the test database itself, wherever it listens.
+    if unreachable == "wrong-password":
+        dsn = make_conninfo(request.getfixturevalue("test_dsn"), password="wrong")
+    else:
+        dsn = _CLOSED_PORT
     client = ClientHandle(SecretString(dsn), None)
     try:
         await _fail_once(client)
@@ -103,7 +106,7 @@ async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
 
 @pytest.mark.timeout(40)
 async def test_concurrent_first_calls_both_fail_cleanly() -> None:
-    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    client = ClientHandle(SecretString(_CLOSED_PORT), None)
     try:
         results = await asyncio.gather(_fail_once(client), _fail_once(client), return_exceptions=True)
         assert results == [None, None]
@@ -113,7 +116,7 @@ async def test_concurrent_first_calls_both_fail_cleanly() -> None:
 
 @pytest.mark.timeout(40)
 async def test_child_of_an_unreachable_owned_handle_gets_the_clear_message() -> None:
-    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    client = ClientHandle(SecretString(_CLOSED_PORT), None)
     try:
         await _fail_once(client.child())
     finally:

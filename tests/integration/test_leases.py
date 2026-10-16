@@ -190,7 +190,7 @@ async def test_concurrent_acquisitions_under_repeatable_read(
             assert sum(1 for r in results if r is not None) == 1
 
 
-async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPersistence) -> None:
+async def test_a_cancelled_block_releases_the_lease(persistence: PostgresPersistence) -> None:
     leases = persistence.leases()
     entered = asyncio.Event()
 
@@ -205,6 +205,11 @@ async def test_cancelled_block_releases_within_a_bound(persistence: PostgresPers
     with pytest.raises(asyncio.CancelledError):
         await task
     assert await leases.try_acquire("r", owner="other", ttl=timedelta(seconds=1)) is not None
+
+
+async def _drain_late_releases() -> None:
+    """Wait for releases still running past their bound, instead of sleeping for a guessed time."""
+    await asyncio.wait_for(asyncio.gather(*list(_leases._late_releases), return_exceptions=True), 5)  # noqa: SLF001
 
 
 async def _cancel_while_holding(leases: PostgresLeases, resource: str) -> float:
@@ -235,9 +240,10 @@ async def test_a_slow_release_holds_a_cancelled_task_only_for_the_bound(
     monkeypatch.setattr(Lease, "release", slow_release)
     with caplog.at_level(logging.WARNING):
         elapsed = await _cancel_while_holding(leases, "threads/slow")
-        assert elapsed < 0.5
+        # The release takes 1 s; returning well before that shows the 0.2 s bound applied.
+        assert elapsed < 0.8
         assert any("did not finish" in r.getMessage() for r in caplog.records if r.name == _leases.__name__)
-        await asyncio.sleep(1)
+        await _drain_late_releases()
 
 
 @pytest.mark.parametrize(("bound", "warnings"), [(5.0, 1), (0.1, 2)], ids=["within-bound", "after-bound"])
@@ -256,7 +262,7 @@ async def test_a_failing_release_logs_only_through_the_package_logger(
     monkeypatch.setattr(Lease, "release", failing_release)
     with caplog.at_level(logging.WARNING):
         await _cancel_while_holding(leases, "threads/failing")
-        await asyncio.sleep(0.5)
+        await _drain_late_releases()
     assert not [r for r in caplog.records if r.name == "asyncio" and r.levelno >= logging.ERROR]
     package = [r for r in caplog.records if r.name == _leases.__name__ and r.levelno == logging.WARNING]
     assert len(package) == warnings

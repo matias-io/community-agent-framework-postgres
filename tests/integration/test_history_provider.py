@@ -169,12 +169,24 @@ async def test_undecodable_row_in_the_window_fails_the_save(persistence: Postgre
         await provider.save_messages("s", [Message(role="user", contents=["b"])])
 
 
-async def test_clear_is_serialized_with_saves(persistence: PostgresPersistence) -> None:
+async def test_clear_and_save_wait_for_the_session_lock(persistence: PostgresPersistence, test_dsn: str) -> None:
     provider = persistence.history_provider()
-    big = [Message(role="user", contents=[str(i)]) for i in range(200)]
-    results = await asyncio.gather(provider.save_messages("s", big), provider.clear("s"), return_exceptions=True)
-    assert all(r is None for r in results)
-    assert len(await provider.get_messages("s")) in (0, 200)
+    await provider.save_messages("s", [Message(role="user", contents=["a"])])
+    async with await AsyncConnection.connect(test_dsn) as blocker:
+        # The key every writer of session "s" takes: schema, prefix, application, tenant, agent, source, session.
+        await blocker.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(concat_ws(chr(31), %s::text, 'af_', 'tests', '', '',"
+            " 'postgres_history', 's'), 0))",
+            (persistence.names.schema,),
+        )
+        clear = asyncio.create_task(provider.clear("s"))
+        save = asyncio.create_task(provider.save_messages("s", [Message(role="user", contents=["b"])]))
+        done, _ = await asyncio.wait({clear, save}, timeout=0.5)
+        assert done == set()
+        assert [m.text for m in await provider.get_messages("s")] == ["a"]
+        await blocker.rollback()
+        await asyncio.wait_for(asyncio.gather(clear, save), 5)
+    assert [m.text for m in await provider.get_messages("s")] in ([], ["b"])
 
 
 async def test_list_sessions_pages(persistence: PostgresPersistence) -> None:

@@ -290,3 +290,11 @@ def test_an_unverified_sslmode_with_a_credential_logs_a_warning(
         ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None)  # no credential: nothing to protect
     [record] = [r for r in caplog.records if r.name == "agent_framework_community_postgres._client"]
     assert f"sslmode={mode}" in record.getMessage() and unchecked in record.getMessage()
+
+
+def test_an_invalid_connection_string_never_echoes_it() -> None:
+    with pytest.raises(PostgresStorageError) as info:
+        ClientHandle(SecretString("host=h password=hunter2-secret port=not-a-port =broken"), None)
+    assert str(info.value) == "Invalid connection string."
+    assert info.value.__cause__ is None and info.value.__suppress_context__
+    assert "hunter2-secret" not in repr(info.value)

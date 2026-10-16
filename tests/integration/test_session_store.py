@@ -91,7 +91,17 @@ async def test_corrupt_snapshot_is_loud(persistence: PostgresPersistence) -> Non
         await store.get("s")
 
 
-async def test_two_writers_last_one_wins(persistence: PostgresPersistence) -> None:
+async def test_the_last_write_wins(persistence: PostgresPersistence) -> None:
+    store = persistence.session_store()
+    first, second = AgentSession(session_id="s"), AgentSession(session_id="s")
+    first.state["n"], second.state["n"] = 1, 2
+    await store.set("s", first)
+    await store.set("s", second)
+    loaded = await store.get("s")
+    assert loaded is not None and loaded.state["n"] == 2
+
+
+async def test_concurrent_writers_both_succeed_and_one_snapshot_remains(persistence: PostgresPersistence) -> None:
     store = persistence.session_store()
     first, second = AgentSession(session_id="s"), AgentSession(session_id="s")
     first.state["n"], second.state["n"] = 1, 2
