@@ -42,6 +42,7 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
         "migrations",
         "compatibility",
         "azure-entra",
+        "connections",
     ):
         assert (ROOT / "docs" / f"{page}.md").exists(), page
         assert re.search(rf"docs/{page}\.md", readme), page
