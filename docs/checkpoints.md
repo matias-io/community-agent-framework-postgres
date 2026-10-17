@@ -32,7 +32,7 @@ PostgresCheckpointStorage(*, application_id, tenant_id=None, scope=None, allowed
 | `scope` | `None` | Keeps one workflow's checkpoints apart, for example per conversation or response. `''` raises `ValueError` |
 | `allowed_checkpoint_types` | `None` | Extra types the decoder may restore, as `"module:QualifiedName"` strings |
 
-The connection arguments and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use). On the hub, call `hub.checkpoint_storage(tenant_id=..., scope=..., allowed_checkpoint_types=...)`.
+The connection arguments and `retention` are the same on every store. See [connections.md](connections.md). On the hub, call `hub.checkpoint_storage(tenant_id=..., scope=..., allowed_checkpoint_types=...)`.
 
 ## Encoding
 
@@ -108,4 +108,4 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
 
 ## Retention
 
-Each checkpoint is its own row, and `save` sets its `expires_at` to now plus the TTL. A later checkpoint does not extend an earlier one. Saving the same `checkpoint_id` again resets that row's expiry. `purge()` deletes expired rows one by one, so a long-running workflow loses its oldest checkpoints first. `purge()` covers this store's scope. Checkpoints are always deleted, never tombstoned, because a partial checkpoint cannot be resumed. See [retention.md](retention.md).
+Each checkpoint is its own row, and `save` sets its `expires_at` to now plus the TTL. A later checkpoint does not extend an earlier one. Saving the same `checkpoint_id` again resets that row's expiry. `purge()` deletes expired rows in batches of 1000, so a long-running workflow loses its oldest checkpoints first. `purge()` covers this store's scope. Checkpoints are always deleted, never tombstoned, because a partial checkpoint cannot be resumed. See [retention.md](retention.md).

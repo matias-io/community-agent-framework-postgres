@@ -29,9 +29,11 @@ class PostgresCheckpointStorage(BaseStore):
     encode them, so the same restricted deserializer and ``allowed_checkpoint_types`` apply, and
     the same warning: the table is a trust boundary, because non-JSON values are pickled. Rows are
     keyed by application, optional ``tenant_id`` and ``scope`` (a conversation or response id, the
-    way Foundry hosting scopes its stores) and the checkpoint id. "Latest" is the last row written
-    in a scope, whatever clock produced it. Saving an existing id replaces its content and keeps
-    its position, as the framework's own stores do.
+    way Foundry hosting scopes its stores) and the checkpoint id. Here ``scope`` names one run; the
+    AG-UI snapshot store's ``scope`` is an authorization boundary instead. "Latest" is the last row
+    written in a scope, whatever clock produced it: saves in one scope take turns on a lock, so
+    parallel runs should each have their own scope. Saving an existing id replaces its content and
+    keeps its position, as the framework's own stores do.
     """
 
     PAYLOAD_FORMAT: ClassVar[str] = "agent-framework.python.checkpoint.v1"

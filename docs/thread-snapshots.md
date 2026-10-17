@@ -23,7 +23,7 @@
 PostgresAGUIThreadSnapshotStore(*, application_id, ...)
 ```
 
-`application_id` is required. The connection arguments and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use).
+`application_id` is required. The connection arguments and `retention` are the same on every store. See [connections.md](connections.md).
 
 ## Behaviour
 
