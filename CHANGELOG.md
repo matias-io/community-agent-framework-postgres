@@ -4,6 +4,41 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-10-19
+
+No public name, schema or migration changes. Upgrading needs no `migrate()` run.
+
+### Added
+
+- Tested on `agent-framework-core` 1.22 and `agent-framework-ag-ui` 1.6, so those versions no longer log the untested-version warning.
+- Python 3.15 support: the full suite passes on 3.15.0b4 locally, and 3.15 is in the CI matrix. psycopg's binary wheel ships for 3.15. Some of MAF's and the extras' own dependencies do not yet: on 3.15, PyYAML (required by `agent-framework-core`) builds from source, and httptools (the `ag-ui` extra, through uvicorn) and frozenlist (the `azure` extra, through aiohttp) need a C compiler to build.
+- `samples/resume_after_restart.py`: a workflow killed after its first step finishes from its checkpoint in a new process.
+- `docs/connections.md`, which takes over the connection reference from the README and adds pool sizing.
+- A warning when a store or hub with a credential uses `sslmode=require` or `verify-ca`, which encrypt without fully verifying the server.
+
+### Changed
+
+- The README leads with what the package implements and how it compares with Microsoft's `agent-framework-postgres`, and links to the guides for detail.
+- The hub's factories list their parameters instead of taking `**kwargs`, so editors and type checkers see them. Passing a hub-owned argument still raises `TypeError`, now Python's own "unexpected keyword argument". `connection_string`, `env_file_path` and `env_file_encoding`, which a factory always refused, now raise that `TypeError` instead of `ValueError`. Leaving out `retention` still means the hub's policy, and `retention=None` still means no expiry.
+- `PostgresHistoryProvider.list_sessions` reads one index entry per session instead of every message on the page.
+- A history save with `max_messages` set trims with one index walk of the kept messages, and deletes nothing while the session is within the limit, instead of an anti-join over the whole session.
+- Lease statements read the clock when each statement starts, so a `renew` inside the caller's own transaction extends the lease from the current time.
+
+### Fixed
+
+- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. It takes about 20% longer on the benchmark in `docs/retention.md`.
+- On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
+- An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
+- `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
+
+### Security and CI
+
+- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels. The two MAF packages stay at their tested floor.
+- `docker-compose.yml` publishes the development database on `127.0.0.1` only.
+- Workflows check out without persisted credentials. The release job builds without a cache, refuses a tag whose commit is not on `main`, and checks the built wheel and source archive before upload.
+- Dependabot also proposes updates to the locked development dependencies, leaving the two MAF packages at their tested floor.
+- In CI, a missing `POSTGRES_TEST_CONNECTION_STRING` fails the run instead of skipping the database tests.
+
 ## [0.1.1] - 2026-10-11
 
 The first release on PyPI.
@@ -68,5 +103,6 @@ Never published to PyPI. It declared `agent-framework-core>=1.19.0,<2`.
 - A CLI, `python -m agent_framework_community_postgres`, with `migrate`, `migrate --print`, `status` and `purge [--mode tombstone|delete] --application-id ID`.
 - Stores created by a hub refuse to run after the hub closes.
 
+[0.1.2]: https://github.com/matias-io/community-agent-framework-postgres/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/50c91c5...v0.1.1
 [0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/tree/50c91c5

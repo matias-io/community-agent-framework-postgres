@@ -1,6 +1,6 @@
 [project]
 name = "community-agent-framework-postgres"
-version = "0.1.1"
+version = "0.1.2"
 description = "PostgreSQL storage for Microsoft Agent Framework: chat history, sessions, workflow checkpoints, AG-UI thread snapshots and leases."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Topic :: Database",
   "Typing :: Typed",
 ]

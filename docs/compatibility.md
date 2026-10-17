@@ -4,20 +4,21 @@
 
 | Package | `agent-framework-core` | `agent-framework-ag-ui` (`ag-ui` extra) | Python | PostgreSQL | psycopg |
 |---|---|---|---|---|---|
+| 0.1.2 | Declared `>=1.20.0,<2`; tested on 1.20.0, 1.21.0 and 1.22.0 | Declared `>=1.5.0,<2`; tested on 1.5.0, 1.5.1 and 1.6.0 | 3.11 to 3.15 | 16, 17 | Declared `>=3.3.5,<4`; tested on 3.3.6 |
 | 0.1.1 | Declared `>=1.20.0,<2`; tested on 1.20.0 and 1.21.0 | Declared `>=1.5.0,<2`; tested on 1.5.0 and 1.5.1 | 3.11 to 3.14 | 16, 17 | Declared `>=3.3.5,<4`; tested on 3.3.6 |
 
 0.1.1 is the first release on PyPI. 0.1.0 was never published.
 
 The `azure` extra installs `azure-identity>=1.19,<2` and `aiohttp>=3.9,<4` for [Microsoft Entra ID sign-in](azure-entra.md).
 
-Python 3.15 is not supported yet: 0.1.1 was not tested on it.
+Python 3.15 is supported from 0.1.2, and the full suite passes on it. psycopg's binary wheel ships for 3.15. As of 19 October 2026, some dependencies of MAF and of this package's extras do not: PyYAML, which `agent-framework-core` requires, builds from source, and httptools (the `ag-ui` extra, through uvicorn) and frozenlist (the `azure` extra, through aiohttp) need a C compiler. That affects any MAF install on 3.15, not this package alone.
 
 ## Support policy
 
 The package declares two ranges and tests a narrower one.
 
 - **Declared**: `agent-framework-core>=1.20.0,<2` and, through the `ag-ui` extra, `agent-framework-ag-ui>=1.5.0,<2`. pip and uv enforce these.
-- **Tested**: `agent-framework-core` 1.20.0 and 1.21.0, with `agent-framework-ag-ui` 1.5.0 and 1.5.1. The lock file pins 1.20.0 and 1.5.0, the lowest supported versions, and CI also runs the suite on the newest release the declared range allows.
+- **Tested**: `agent-framework-core` 1.20.0, 1.21.0 and 1.22.0, with `agent-framework-ag-ui` 1.5.0, 1.5.1 and 1.6.0. The lock file pins 1.20.0 and 1.5.0, the lowest supported versions, and CI also runs the suite on the newest release the declared range allows.
 
 The declared range assumes Agent Framework follows semantic versioning and keeps breaking changes for major versions. Microsoft's own integrations make the same assumption: `agent-framework-azure-cosmos` and `agent-framework-redis` declare `agent-framework-core>=1.19.0,<2`. This package starts at 1.20 instead, for the reason under [Behaviour MAF owns](#behaviour-maf-owns). Microsoft releases its packages in lockstep with MAF. This package cannot, and MAF ships a minor every one to two weeks, so a range that listed only tested minors would block every new MAF release until a patch release here caught up. Instead, a weekly canary workflow runs the suite against the newest MAF release, and each minor that passes is added to the tested range in the next release.
 
@@ -47,7 +48,7 @@ For a newer minor, the warning means the combination has not been run here, not 
 
 ### If a newer MAF breaks something
 
-Pin the last tested minor, for example `agent-framework-core<1.22`, and open an issue at <https://github.com/matias-io/community-agent-framework-postgres/issues> with the MAF version and the error. A fix ships in a patch release.
+Pin the last tested minor, for example `agent-framework-core<1.23`, and open an issue at <https://github.com/matias-io/community-agent-framework-postgres/issues> with the MAF version and the error. A fix ships in a patch release.
 
 ### Behaviour MAF owns
 
@@ -61,9 +62,9 @@ MAF does not export the three names below, from two private modules. Microsoft's
 
 | Name | Module | Used for | Verified on |
 |---|---|---|---|
-| `filter_new_messages` | `agent_framework._sessions` | Dropping replayed messages in `PostgresHistoryProvider` | `agent-framework-core` 1.20.0 and 1.21.0 |
-| `encode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Encoding checkpoints in `PostgresCheckpointStorage` | `agent-framework-core` 1.20.0 and 1.21.0 |
-| `decode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Decoding checkpoints and the save-time restore check | `agent-framework-core` 1.20.0 and 1.21.0 |
+| `filter_new_messages` | `agent_framework._sessions` | Dropping replayed messages in `PostgresHistoryProvider` | `agent-framework-core` 1.20.0, 1.21.0 and 1.22.0 |
+| `encode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Encoding checkpoints in `PostgresCheckpointStorage` | `agent-framework-core` 1.20.0, 1.21.0 and 1.22.0 |
+| `decode_checkpoint_value` | `agent_framework._workflows._checkpoint_encoding` | Decoding checkpoints and the save-time restore check | `agent-framework-core` 1.20.0, 1.21.0 and 1.22.0 |
 
 `tests/unit/test_framework.py` guards all three. It checks the names exist, that the checkpoint encoding round-trips `datetime` and `UUID` values, and that `filter_new_messages` drops a replayed prefix. If an upstream release removes a name, importing the package raises `ImportError` naming the installed `agent-framework-core` version, the declared range and the tested minors, and asking you to pin an earlier version and open an issue. CI runs the suite a second time against the newest `agent-framework-core` the declared range allows, and that job blocks a merge. The weekly canary runs it against the newest MAF release, so a rename in a new MAF minor shows up there first.
 

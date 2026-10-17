@@ -20,6 +20,16 @@ def test_readme_names_every_public_store() -> None:
     assert "agent-framework-core" in readme and "1.20" in readme
 
 
+def test_every_tested_minor_is_in_the_readme_and_the_compatibility_guide() -> None:
+    from agent_framework_community_postgres import _framework
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs" / "compatibility.md").read_text(encoding="utf-8")
+    for minor in (*_framework.TESTED_CORE, *_framework.TESTED_AG_UI):
+        assert re.search(rf"\b{re.escape(minor)}\.\d", readme), minor
+        assert re.search(rf"\b{re.escape(minor)}\.\d", guide), minor
+
+
 def test_docs_pages_exist_and_are_linked_from_readme() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for page in (
