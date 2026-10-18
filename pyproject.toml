@@ -73,24 +73,41 @@ addopts = "-ra -q --strict-markers --import-mode=importlib"
 markers = ["integration: needs POSTGRES_TEST_CONNECTION_STRING and a reachable PostgreSQL"]
 filterwarnings = ["error", "ignore::agent_framework._feature_stage.ExperimentalWarning"]
 
+# Microsoft agent-framework's ruff settings (python/pyproject.toml), less its copyright-notice rule, which
+# applies to Microsoft's own files, and with this package's own docstring exemptions.
 [tool.ruff]
 line-length = 120
 target-version = "py311"
 src = ["src", "tests"]
+preview = true
 
 [tool.ruff.lint]
-select = ["ASYNC", "B", "D", "E", "F", "I", "ISC", "Q", "RET", "RSE", "RUF", "S", "SIM", "T20", "W"]
-ignore = ["D100", "D104", "D105", "D107", "D203", "D213"]
+select = [
+  "ASYNC", "B", "D", "E", "ERA", "F", "FIX", "I", "INP", "ISC", "Q", "RET", "RSE", "RUF", "S", "SIM", "T100",
+  "T20", "TD", "W",
+]
+ignore = [
+  "D100", "D104", "D105", "D107", "D203", "D213", "D418", "D421", "TD003", "FIX002", "ASYNC119", "B027", "B905",
+  "RUF067", "RUF201",
+]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D", "S", "RUF"]
-"samples/**" = ["D", "T20", "S"]
+"tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "S"]
+"samples/**" = ["D", "INP", "ERA001", "RUF", "S", "T20"]
 "src/agent_framework_community_postgres/_cli.py" = ["T20"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.format]
+docstring-code-format = true
+
+# Microsoft agent-framework's pyright settings: strict, and a stale ignore comment or cast is an error.
 [tool.pyright]
 include = ["src"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
+reportUnnecessaryIsInstance = false
+reportMissingTypeStubs = false
+reportUnnecessaryCast = "error"
+reportUnnecessaryTypeIgnoreComment = "error"

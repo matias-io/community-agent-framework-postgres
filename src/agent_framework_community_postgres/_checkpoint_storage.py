@@ -70,16 +70,14 @@ class PostgresCheckpointStorage(BaseStore):
         self.tenant_id = optional_text(tenant_id, "tenant_id")
         self.scope = optional_text(scope, "scope")
         self._allowed_types: frozenset[str] = frozenset(allowed_checkpoint_types or [])
-        self._lock_key = json.dumps(
-            [
-                "agent-framework-postgres:checkpoints",
-                schema,
-                table_prefix,
-                self.application_id,
-                self.tenant_id,
-                self.scope,
-            ]
-        )
+        self._lock_key = json.dumps([
+            "agent-framework-postgres:checkpoints",
+            schema,
+            table_prefix,
+            self.application_id,
+            self.tenant_id,
+            self.scope,
+        ])
 
     _SCOPE = sql.SQL(
         "application_id = %(app)s AND tenant_id = %(tenant)s AND scope = %(scope)s AND payload_format = %(format)s"

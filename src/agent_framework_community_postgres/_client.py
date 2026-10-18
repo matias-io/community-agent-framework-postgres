@@ -215,7 +215,7 @@ class ClientHandle:
             )
         if pool_kwargs is not None and client is not None:
             raise ValueError("pool_kwargs cannot be combined with client; it configures a pool this handle owns.")
-        if client is not None and not isinstance(client, (AsyncConnection, AsyncConnectionPool)):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if client is not None and not isinstance(client, (AsyncConnection, AsyncConnectionPool)):
             raise TypeError("client must be a psycopg AsyncConnection or AsyncConnectionPool.")
         self.owned = client is None
         self.client: PostgresClient

@@ -156,12 +156,10 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
         parts.append("BEGIN;")
         parts.append(timeout + ";")
         parts.extend(statement.as_string() + ";" for statement in MIGRATIONS[version - 1](names))
-        parts.append(
-            sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})")  # noqa: S608
-            .format(migrations=names.table("migrations"), version=sql.Literal(version))
-            .as_string()
-            + ";"
+        record = sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})").format(
+            migrations=names.table("migrations"), version=sql.Literal(version)
         )
+        parts.append(record.as_string() + ";")
         parts.append("COMMIT;")
     return "\n".join(parts) + "\n"
 
