@@ -216,3 +216,24 @@ async def test_history_purge_rejects_a_batch_size_below_one(persistence: Postgre
             application_id=persistence.application_id,
             batch_size=0,
         )
+
+
+async def test_history_purge_locks_at_most_64_sessions_per_transaction(
+    persistence: PostgresPersistence, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = persistence.history_provider(retention=RetentionPolicy(ttl=timedelta(hours=1)))
+    for i in range(150):
+        await provider.save_messages(f"s{i}", [Message(role="user", contents=["q"])])
+    await _expire_history(persistence)
+    handle = persistence._client  # noqa: SLF001
+    original = handle.connection
+    opened: list[int] = []
+
+    def counting(**kwargs: Any) -> AbstractAsyncContextManager[AsyncConnection[Any]]:
+        opened.append(1)
+        return original(**kwargs)
+
+    monkeypatch.setattr(handle, "connection", counting)
+    assert await purge_history(handle, persistence.names, application_id=persistence.application_id) == 150
+    assert len(opened) == 4  # 64 + 64 + 22 sessions, then a round that finds none
+    assert await provider.list_sessions() == []

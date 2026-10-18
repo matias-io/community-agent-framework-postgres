@@ -295,6 +295,11 @@ def _key_arrays(prefix: str, keys: Sequence[tuple[str, str, str, str]]) -> dict[
     }
 
 
+# Sessions one purge round locks at most. Each costs an entry in the server's shared lock table, which holds
+# max_locks_per_transaction (64 by default) per connection, so a round never takes more than its share.
+_SESSIONS_PER_ROUND = 64
+
+
 async def purge_history(
     client: ClientHandle,
     names: TableNames,
@@ -307,7 +312,7 @@ async def purge_history(
 
     A session is deleted whole or not at all: a row written while ``ttl`` was ``None`` has no expiry
     and keeps its session, so a conversation that goes on never loses its head and a tool call never
-    loses its result. Each transaction finds the sessions of up to ``batch_size`` expired messages
+    loses its result. Each transaction finds up to 64 sessions among ``batch_size`` expired messages
     whose sessions have no live message, tries those sessions' save locks, and deletes the sessions it
     locked, checking again in a statement that starts after the lock, so a save that committed
     meanwhile keeps its session. A session another writer holds is skipped for the rest of this
@@ -322,6 +327,7 @@ async def purge_history(
         "schema": names.schema,
         "prefix": names.prefix,
         "batch": batch_size,
+        "sessions": _SESSIONS_PER_ROUND,
     }
     narrow = sql.SQL("")
     if scope is not None:
@@ -335,7 +341,7 @@ async def purge_history(
         " (SELECT c.tenant_id, c.agent_id, c.source_id, c.session_id FROM {history} c"
         " WHERE c.application_id = %(app)s{narrow} AND c.expires_at < now() AND {no_live}"
         " AND (c.tenant_id, c.agent_id, c.source_id, c.session_id) NOT IN (SELECT k.t, k.a, k.s, k.sess FROM {skipped})"
-        " LIMIT %(batch)s) c) d"
+        " LIMIT %(batch)s) c LIMIT %(sessions)s) d"
     ).format(
         key=_session_lock_key(
             sql.SQL("d.tenant_id"), sql.SQL("d.agent_id"), sql.SQL("d.source_id"), sql.SQL("d.session_id")
