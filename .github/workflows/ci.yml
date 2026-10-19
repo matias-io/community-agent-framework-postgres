@@ -26,6 +26,67 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
 
+  # Microsoft agent-framework's "Test Typing Checks" and "Samples & Markdown" jobs: tests and samples are
+  # type-checked in its relaxed profile, and the documentation's code blocks against the installed packages.
+  test-typing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked --all-extras --group typing
+      # Test modules share names across tests/unit, tests/integration and tests/conformance, so mypy and
+      # zuban check one directory at a time.
+      - run: |
+          for directory in tests/unit tests/integration tests/conformance; do
+            uv run --no-sync mypy "$directory"
+            uv run --no-sync zuban mypy "$directory"
+          done
+          uv run --no-sync mypy samples
+      - run: uv run --no-sync pyrefly check
+      - run: uv run --no-sync ty check
+      - run: uv run --no-sync pyright -p pyrightconfig.tests.json
+      - run: uv run --no-sync --with "agent-framework-openai>=1.17.0,<2" python scripts/check_markdown_code.py README.md docs/*.md
+
+  # The package documents Windows-specific behaviour, so the unit tests run there too. Windows runners have
+  # no PostgreSQL service container, so the database suite runs on Linux only.
+  unit-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked --all-extras
+      - run: uv run --no-sync pytest tests/unit
+
+  # Microsoft agent-framework fails a pull request below 85% test coverage.
+  coverage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_framework
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_framework"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked --all-extras
+      - run: uv run --no-sync pytest --cov=agent_framework_community_postgres --cov-branch --cov-report=term-missing --cov-fail-under=85
+
   test:
     runs-on: ubuntu-latest
     strategy:

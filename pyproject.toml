@@ -46,7 +46,12 @@ dev = [
   "agent-framework-ag-ui>=1.5.0,<2",
   "azure-identity>=1.19,<2",
   "aiohttp>=3.9,<4",
+  "pytest-cov>=6",
 ]
+# The type checkers Microsoft agent-framework gates its tests and samples on.
+typing = ["mypy>=2.4", "zuban>=0.10", "pyrefly>=1.4", "ty>=0.0.89"]
+# Release checks on the built distributions.
+release = ["twine>=6"]
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -58,7 +63,7 @@ packages = ["src/agent_framework_community_postgres"]
 [tool.hatch.build.targets.sdist]
 include = [
   "src", "tests", "docs", "samples", "README.md", "CHANGELOG.md", "LICENSE",
-  "CONTRIBUTING.md", "docker-compose.yml", "uv.lock",
+  "CONTRIBUTING.md", "docker-compose.yml", "uv.lock", "scripts", "pyrightconfig.tests.json",
 ]
 
 [tool.uv]
@@ -95,6 +100,7 @@ ignore = [
 "tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "S"]
 "samples/**" = ["D", "INP", "ERA001", "RUF", "S", "T20"]
 "src/agent_framework_community_postgres/_cli.py" = ["T20"]
+"scripts/**" = ["INP", "T20", "S"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -111,3 +117,32 @@ reportUnnecessaryIsInstance = false
 reportMissingTypeStubs = false
 reportUnnecessaryCast = "error"
 reportUnnecessaryTypeIgnoreComment = "error"
+
+# Tests and samples are type-checked in Microsoft agent-framework's relaxed profile: real errors in how the
+# public API is used fail, unannotated test functions do not. Pyright strict owns the source above.
+# Run mypy and zuban per directory: test modules share names across tests/unit, integration and conformance.
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_return_any = false
+warn_unused_ignores = false
+show_error_codes = true
+
+[tool.pyrefly]
+project-includes = ["tests", "samples"]
+
+[tool.pyrefly.errors]
+# Test and mock code legitimately reaches attributes dynamically.
+missing-attribute = false
+
+[tool.ty.src]
+include = ["tests", "samples"]
+
+[tool.ty.rules]
+unused-ignore-comment = "ignore"
+unused-type-ignore-comment = "ignore"

@@ -52,19 +52,36 @@ jobs:
       - run: uv sync --locked --all-extras
       - run: uv run pytest -v
       - run: uv build
-      - name: Check the built distributions
-        run: |
-          uvx twine check --strict dist/*
-          wheel=$(ls dist/*.whl)
-          check="import agent_framework_community_postgres as p; assert p.__version__ == '${GITHUB_REF_NAME#v}'"
-          uv run --isolated --no-project --with "$wheel" python -c "$check"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist
           path: dist/
 
-  publish:
+  # Checks run in their own job on a downloaded copy, so nothing they install can change the files publish uploads.
+  verify:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dist
+          path: dist/
+      - run: uv sync --locked --no-default-groups --group release
+      - run: uv run --no-sync twine check --strict dist/*
+      - name: Import the built wheel
+        run: |
+          wheel=$(ls dist/*.whl)
+          check="import agent_framework_community_postgres as p; assert p.__version__ == '${GITHUB_REF_NAME#v}'"
+          uv run --isolated --no-project --with "$wheel" python -c "$check"
+
+  publish:
+    needs: [build, verify]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
