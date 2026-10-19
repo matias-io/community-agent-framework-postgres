@@ -75,10 +75,16 @@ async def test_a_repeated_input_is_kept_not_dropped_as_a_replay(history: Postgre
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:
-    kwargs = {"application_id": "tests", "client": client.client, "schema": migrated.schema}
-    a = PostgresHistoryProvider(tenant_id="t1", **kwargs)
-    b = PostgresHistoryProvider(tenant_id="t2", **kwargs)
-    other_source = PostgresHistoryProvider("audit", tenant_id="t1", **kwargs)
+    def provider(
+        source_id: str = PostgresHistoryProvider.DEFAULT_SOURCE_ID, *, tenant_id: str
+    ) -> PostgresHistoryProvider:
+        return PostgresHistoryProvider(
+            source_id, application_id="tests", tenant_id=tenant_id, client=client.client, schema=migrated.schema
+        )
+
+    a = provider(tenant_id="t1")
+    b = provider(tenant_id="t2")
+    other_source = provider("audit", tenant_id="t1")
     await a.save_messages("s", [Message(role="user", contents=["a"])])
     assert await b.get_messages("s") == []
     assert await other_source.get_messages("s") == []
@@ -129,7 +135,9 @@ async def test_concurrent_saves_under_repeatable_read(test_dsn: str, schema: str
     async def repeatable_read(connection: AsyncConnection[Any]) -> None:
         await connection.execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ")
 
-    pool = AsyncConnectionPool(test_dsn, open=False, kwargs={"autocommit": True}, configure=repeatable_read)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(
+        test_dsn, open=False, kwargs={"autocommit": True}, configure=repeatable_read
+    )
     async with pool, PostgresPersistence(application_id="tests", client=pool, schema=schema) as hub:
         await hub.migrate()
         provider = hub.history_provider()

@@ -1,5 +1,5 @@
 import logging
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from agent_framework import SecretString
@@ -79,6 +79,7 @@ def test_create_client_explicit_connection_string_beats_environment(monkeypatch:
 def test_create_client_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_CONNECTION_STRING", "host=environment password=env-secret")
     client = create_client(None, client=None, env_file_path=None, env_file_encoding=None)
+    assert isinstance(client.client, AsyncConnectionPool)
     assert client.client.conninfo == "host=environment password=env-secret"
 
 
@@ -86,7 +87,7 @@ def test_create_client_requires_exactly_one_source(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("POSTGRES_CONNECTION_STRING", raising=False)
     with pytest.raises(SettingNotFoundError):
         create_client(None, client=None, env_file_path=None, env_file_encoding=None)
-    pool = AsyncConnectionPool("host=x", open=False)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool("host=x", open=False)
     with pytest.raises(ValueError):
         create_client("host=y", client=pool, env_file_path=None, env_file_encoding=None)
 
@@ -98,7 +99,7 @@ def test_secret_string_is_accepted_and_never_rendered() -> None:
 
 def test_borrowed_client_must_be_psycopg_object() -> None:
     with pytest.raises(TypeError):
-        ClientHandle(None, object())  # type: ignore[arg-type]
+        ClientHandle(None, cast(Any, object()))
 
 
 async def test_closed_client_refuses_connections() -> None:
@@ -141,17 +142,25 @@ def test_create_client_borrows_a_handle_as_a_child() -> None:
         create_client("host=h", client=parent, env_file_path=None, env_file_encoding=None)
 
 
+def _connection_kwargs(handle: ClientHandle) -> dict[str, Any]:
+    """The keyword arguments an owned pool passes to each connection; psycopg_pool types them loosely."""
+    assert isinstance(handle.client, AsyncConnectionPool)
+    kwargs = handle.client.kwargs
+    assert isinstance(kwargs, dict)
+    return kwargs
+
+
 def test_owned_pool_defaults_connect_timeout_to_ten() -> None:
     handle = ClientHandle(SecretString("host=127.0.0.1 dbname=x"), None)
     assert isinstance(handle.client, AsyncConnectionPool)
-    assert handle.client.kwargs["connect_timeout"] == 10
+    assert _connection_kwargs(handle)["connect_timeout"] == 10
     assert handle.client.timeout == 10.0
 
 
 def test_owned_pool_keeps_a_conninfo_connect_timeout() -> None:
     handle = ClientHandle(SecretString("host=127.0.0.1 dbname=x connect_timeout=3"), None)
     assert isinstance(handle.client, AsyncConnectionPool)
-    assert "connect_timeout" not in handle.client.kwargs  # the conninfo's own 3 stays in force
+    assert "connect_timeout" not in _connection_kwargs(handle)  # the conninfo's own 3 stays in force
 
 
 def test_invalid_conninfo_is_reported_without_echoing_it() -> None:
@@ -182,7 +191,7 @@ def test_storage_error_carries_classification() -> None:
 def test_owned_pool_connection_defaults() -> None:
     handle = ClientHandle(SecretString("postgresql://u:p@127.0.0.1:5433/db"), None)
     assert isinstance(handle.client, AsyncConnectionPool)
-    kwargs = handle.client.kwargs
+    kwargs = _connection_kwargs(handle)
     assert kwargs["connect_timeout"] == 10
     assert kwargs["keepalives"] == 1
     assert kwargs["tcp_user_timeout"] == 30000
@@ -193,8 +202,8 @@ def test_owned_pool_connection_defaults() -> None:
 def test_conninfo_values_win_over_defaults() -> None:
     handle = ClientHandle(SecretString("postgresql://u:p@127.0.0.1:5433/db?connect_timeout=3&keepalives=0"), None)
     assert isinstance(handle.client, AsyncConnectionPool)
-    assert "connect_timeout" not in handle.client.kwargs
-    assert "keepalives" not in handle.client.kwargs
+    assert "connect_timeout" not in _connection_kwargs(handle)
+    assert "keepalives" not in _connection_kwargs(handle)
 
 
 def test_pool_kwargs_override_pool_and_connection_defaults() -> None:
@@ -205,8 +214,8 @@ def test_pool_kwargs_override_pool_and_connection_defaults() -> None:
     )
     assert isinstance(handle.client, AsyncConnectionPool)
     assert handle.client.max_size == 50
-    assert handle.client.kwargs["prepare_threshold"] is None
-    assert handle.client.kwargs["keepalives"] == 1
+    assert _connection_kwargs(handle)["prepare_threshold"] is None
+    assert _connection_kwargs(handle)["keepalives"] == 1
 
 
 class _Credential:
@@ -214,12 +223,16 @@ class _Credential:
         raise AssertionError("not called")
 
 
+# A stand-in that is never asked for a token; typed loosely, since it does not implement azure-identity's protocol.
+_CREDENTIAL: Any = _Credential()
+
+
 def test_pool_kwargs_cannot_replace_the_entra_connection_class() -> None:
     with pytest.raises(ValueError, match="connection_class"):
         ClientHandle(
             SecretString("postgresql://u:p@127.0.0.1:5433/db"),
             None,
-            credential=_Credential(),  # type: ignore[arg-type]
+            credential=_CREDENTIAL,
             pool_kwargs={"connection_class": AsyncConnection},
         )
 
@@ -228,23 +241,23 @@ def test_weak_sslmode_is_refused_with_a_credential(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("PGSSLMODE", raising=False)
     for mode in ("disable", "allow", "prefer"):
         with pytest.raises(ValueError, match=f"sslmode={mode}"):
-            ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_Credential())  # type: ignore[arg-type]
+            ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_CREDENTIAL)
     monkeypatch.setenv("PGSSLMODE", "prefer")
     with pytest.raises(ValueError, match="PGSSLMODE"):
-        ClientHandle(SecretString("postgresql://u@h/db"), None, credential=_Credential())  # type: ignore[arg-type]
+        ClientHandle(SecretString("postgresql://u@h/db"), None, credential=_CREDENTIAL)
     monkeypatch.delenv("PGSSLMODE")
-    ClientHandle(SecretString("postgresql://u@h/db?sslmode=require"), None, credential=_Credential())  # type: ignore[arg-type]
+    ClientHandle(SecretString("postgresql://u@h/db?sslmode=require"), None, credential=_CREDENTIAL)
     ClientHandle(SecretString("postgresql://u@h/db?sslmode=prefer"), None)  # no credential: the user's choice
 
 
 def test_the_sslmode_libpq_would_use_is_the_one_checked(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PGSSLMODE", "prefer")
-    ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_Credential())  # type: ignore[arg-type]
+    ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_CREDENTIAL)
     with pytest.raises(ValueError, match="sslmode=disable"):
         ClientHandle(
             SecretString("postgresql://u@h/db?sslmode=verify-full"),
             None,
-            credential=_Credential(),  # type: ignore[arg-type]
+            credential=_CREDENTIAL,
             pool_kwargs={"kwargs": {"sslmode": "disable"}},
         )
 
@@ -275,7 +288,7 @@ async def test_stores_and_the_hub_take_pool_kwargs() -> None:
     hub = PostgresPersistence(application_id="tests", connection_string=dsn, pool_kwargs={"max_size": 4})
     assert isinstance(hub.pool, AsyncConnectionPool) and hub.pool.max_size == 4
     with pytest.raises(TypeError, match="unexpected keyword argument 'pool_kwargs'"):
-        hub.session_store(pool_kwargs={"max_size": 5})
+        cast(Any, hub).session_store(pool_kwargs={"max_size": 5})
     await hub.close()
 
 
@@ -285,8 +298,8 @@ def test_an_unverified_sslmode_with_a_credential_logs_a_warning(
 ) -> None:
     monkeypatch.delenv("PGSSLMODE", raising=False)
     with caplog.at_level(logging.WARNING, logger="agent_framework_community_postgres._client"):
-        ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_Credential())  # type: ignore[arg-type]
-        ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_Credential())  # type: ignore[arg-type]
+        ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None, credential=_CREDENTIAL)
+        ClientHandle(SecretString("postgresql://u@h/db?sslmode=verify-full"), None, credential=_CREDENTIAL)
         ClientHandle(SecretString(f"postgresql://u@h/db?sslmode={mode}"), None)  # no credential: nothing to protect
     [record] = [r for r in caplog.records if r.name == "agent_framework_community_postgres._client"]
     assert f"sslmode={mode}" in record.getMessage() and unchecked in record.getMessage()

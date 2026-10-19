@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Any
 
 import pytest
 from agent_framework import AgentSession, SecretString
@@ -37,7 +38,7 @@ async def test_driver_errors_are_wrapped(test_dsn: str) -> None:
 
 
 async def test_borrowed_pool_is_opened_on_demand(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(test_dsn, open=False)
     try:
         client = ClientHandle(None, pool)
         async with client.connection() as connection:
@@ -51,7 +52,7 @@ async def test_borrowed_pool_is_opened_on_demand(test_dsn: str) -> None:
 
 
 async def test_closed_borrowed_pool_raises_storage_error(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(test_dsn, open=False)
     await pool.open()
     await pool.close()
     with pytest.raises(PostgresStorageError) as info:
@@ -139,7 +140,9 @@ async def test_concurrent_calls_over_one_borrowed_connection_are_serialized(test
 
 @pytest.mark.timeout(30)
 async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False, min_size=1, max_size=1, timeout=2.0)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(
+        test_dsn, open=False, min_size=1, max_size=1, timeout=2.0
+    )
     await pool.open()
     try:
         async with pool.connection():

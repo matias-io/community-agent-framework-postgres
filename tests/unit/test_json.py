@@ -19,6 +19,7 @@ def test_encodes_once_and_passes_the_text_through() -> None:
     value = {"a": [1, 2.5, "é", None]}
     adapted = encode_jsonb(value, what="Value")
     assert adapted.obj is value
+    assert adapted.dumps is not None
     assert adapted.dumps(value) == json.dumps(value, ensure_ascii=False)
 
 

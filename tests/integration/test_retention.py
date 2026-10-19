@@ -10,14 +10,14 @@ from psycopg import AsyncConnection, sql
 from agent_framework_community_postgres import PostgresPersistence
 from agent_framework_community_postgres._client import ClientHandle, TableNames
 from agent_framework_community_postgres._history_provider import purge_history
-from agent_framework_community_postgres._retention import RetentionPolicy, purge_rows
+from agent_framework_community_postgres._retention import RetentionMode, RetentionPolicy, purge_rows
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize(("mode", "tombstone"), [("delete", None), ("tombstone", sql.SQL("snapshot = NULL"))])
 async def test_an_or_predicate_never_purges_live_rows(
-    client: ClientHandle, migrated: TableNames, mode: str, tombstone: sql.Composable | None
+    client: ClientHandle, migrated: TableNames, mode: RetentionMode, tombstone: sql.Composable | None
 ) -> None:
     sessions = migrated.table("sessions")
     async with client.connection() as connection:
@@ -33,7 +33,7 @@ async def test_an_or_predicate_never_purges_live_rows(
         table=sessions,
         where=sql.SQL("session_id = %(a)s OR session_id = %(b)s"),
         params={"a": "live", "b": "expired"},
-        mode=mode,  # type: ignore[arg-type]
+        mode=mode,
         tombstone=tombstone,
     )
     assert count == 1

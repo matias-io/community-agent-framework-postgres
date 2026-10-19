@@ -1,8 +1,9 @@
 import copy
 import dataclasses
 import pickle
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import timedelta
+from typing import Any, cast
 
 import pytest
 
@@ -25,7 +26,7 @@ def test_policy_rejects_non_positive_ttl(ttl: timedelta) -> None:
 
 def test_policy_rejects_unknown_mode() -> None:
     with pytest.raises(ValueError):
-        RetentionPolicy(mode="archive")  # type: ignore[arg-type]
+        RetentionPolicy(mode=cast(Any, "archive"))
 
 
 def test_purge_report_adds_and_totals() -> None:
@@ -50,7 +51,7 @@ def test_purge_report_counts_are_a_read_only_copy() -> None:
     source["af_checkpoints"] = 5
     assert report.counts == {"af_checkpoints": 1}
     with pytest.raises(TypeError):
-        report.counts["af_checkpoints"] = 2  # type: ignore[index]
+        cast(Any, report.counts)["af_checkpoints"] = 2
 
 
 def test_purge_report_pickles_and_copies() -> None:
@@ -59,7 +60,7 @@ def test_purge_report_pickles_and_copies() -> None:
         assert clone == report
         assert clone.total == 2
         with pytest.raises(TypeError):
-            clone.counts["af_checkpoints"] = 3  # type: ignore[index]
+            cast(Any, clone.counts)["af_checkpoints"] = 3
 
 
 @pytest.mark.parametrize(
@@ -74,10 +75,10 @@ def test_purge_report_pickles_and_copies() -> None:
         lambda counts: counts.clear(),
     ],
 )
-def test_purge_report_counts_refuse_every_change(mutate: object) -> None:
+def test_purge_report_counts_refuse_every_change(mutate: Callable[[Any], object]) -> None:
     report = PurgeReport({"af_checkpoints": 1})
     with pytest.raises((TypeError, AttributeError)):  # no mutators at all, as on a MappingProxyType
-        mutate(report.counts)  # type: ignore[operator]
+        mutate(report.counts)
     assert report.counts == {"af_checkpoints": 1}
 
 
@@ -85,21 +86,21 @@ def test_purge_report_counts_refuse_every_change(mutate: object) -> None:
     "bypass",
     [
         lambda counts: dict.__setitem__(counts, "af_checkpoints", 2),
-        lambda counts: dict.update(counts, {"af_sessions": 1}),
+        lambda counts: cast(Any, dict).update(counts, {"af_sessions": 1}),
         lambda counts: dict.clear(counts),
         lambda counts: setattr(counts, "_data", {"af_sessions": 1}),
     ],
 )
-def test_purge_report_counts_refuse_dict_bypasses(bypass: object) -> None:
+def test_purge_report_counts_refuse_dict_bypasses(bypass: Callable[[Any], object]) -> None:
     report = PurgeReport({"af_checkpoints": 1})
     with pytest.raises(TypeError):
-        bypass(report.counts)  # type: ignore[operator]
+        bypass(report.counts)
     assert report.counts == {"af_checkpoints": 1}
 
 
 def test_calling_init_again_changes_nothing() -> None:
     report = PurgeReport({"af_checkpoints": 1})
-    report.counts.__init__({"af_sessions": 9})  # type: ignore[misc]
+    cast(Any, report.counts).__init__({"af_sessions": 9})
     assert report.counts == {"af_checkpoints": 1}
 
 

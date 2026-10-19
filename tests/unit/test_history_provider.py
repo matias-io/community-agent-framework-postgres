@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 from agent_framework import Message
 from psycopg_pool import AsyncConnectionPool
@@ -28,9 +30,9 @@ def test_defaults_match_the_redis_provider_shape() -> None:
         {"max_messages": True},
     ],
 )
-def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, object]) -> None:
+def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
-        PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)  # type: ignore[arg-type]
+        PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)
 
 
 async def test_none_session_id_is_an_error() -> None:
@@ -53,4 +55,4 @@ async def test_empty_or_missing_session_id_is_rejected_everywhere(session_id: st
 async def test_non_string_session_id_is_rejected() -> None:
     provider = PostgresHistoryProvider(application_id="app", client=_pool())
     with pytest.raises(ValueError):
-        await provider.get_messages(5)  # type: ignore[arg-type]
+        await provider.get_messages(cast(Any, 5))
