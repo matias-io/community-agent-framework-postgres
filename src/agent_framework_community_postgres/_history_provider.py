@@ -89,7 +89,10 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             retention=retention,
             pool_kwargs=pool_kwargs,
         )
-        if max_messages is not None and max_messages < 0:
+        # bool is an int, and a float such as inf or nan passes `< 0` only to fail every later save.
+        if max_messages is not None and (
+            isinstance(max_messages, bool) or not isinstance(max_messages, int) or max_messages < 0
+        ):
             raise ValueError("max_messages must be None (unlimited) or a non-negative integer.")
         self.tenant_id = optional_text(tenant_id, "tenant_id")
         self.agent_id = optional_text(agent_id, "agent_id")

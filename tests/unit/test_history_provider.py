@@ -16,7 +16,18 @@ def test_defaults_match_the_redis_provider_shape() -> None:
     assert provider.tenant_id == "" and provider.agent_id == ""
 
 
-@pytest.mark.parametrize("kwargs", [{"tenant_id": ""}, {"agent_id": ""}, {"max_messages": -1}])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"tenant_id": ""},
+        {"agent_id": ""},
+        {"max_messages": -1},
+        {"max_messages": float("inf")},
+        {"max_messages": float("nan")},
+        {"max_messages": 2.0},
+        {"max_messages": True},
+    ],
+)
 def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)  # type: ignore[arg-type]
