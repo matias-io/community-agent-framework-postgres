@@ -31,7 +31,7 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 - On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
 - An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
 - `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
-- `max_messages` accepted `inf`, `nan` and `True`. A float then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for anything but `None` or a non-negative `int`.
+- `max_messages` accepted `inf` and `nan`, which then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for those, for a fraction such as `2.5` and for a bool. A whole float such as `2.0` and an int-like such as `numpy.int64` still work, stored as an `int`.
 
 ### Security and CI
 

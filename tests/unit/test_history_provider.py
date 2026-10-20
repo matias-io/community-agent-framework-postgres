@@ -26,13 +26,19 @@ def test_defaults_match_the_redis_provider_shape() -> None:
         {"max_messages": -1},
         {"max_messages": float("inf")},
         {"max_messages": float("nan")},
-        {"max_messages": 2.0},
+        {"max_messages": 2.5},
         {"max_messages": True},
     ],
 )
 def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)
+
+
+@pytest.mark.parametrize(("given", "stored"), [(None, None), (0, 0), (3, 3), (2.0, 2)])
+def test_accepts_the_limits_0_1_1_accepted(given: Any, stored: int | None) -> None:
+    provider = PostgresHistoryProvider(application_id="app", client=_pool(), max_messages=given)
+    assert provider.max_messages == stored and (stored is None or type(provider.max_messages) is int)
 
 
 async def test_none_session_id_is_an_error() -> None:

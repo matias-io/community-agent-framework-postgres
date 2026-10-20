@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import operator
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar, cast
 
@@ -26,6 +27,28 @@ def _session_lock_key(
     return sql.SQL(
         "hashtextextended(concat_ws(chr(31), %(schema)s::text, %(prefix)s::text, %(app)s::text, {}, {}, {}, {}), 0)"
     ).format(tenant, agent, source, session)
+
+
+def _message_limit(value: object) -> int | None:
+    """``max_messages`` as an int, or ``None`` for no limit.
+
+    A whole float such as ``2.0`` and an int-like such as ``numpy.int64`` are accepted, as in 0.1.1. A float such
+    as ``inf`` or ``nan``, a fraction, a negative number or a bool raises ``ValueError``: each passed 0.1.1's
+    check only to fail every later save, or to mean something other than a count.
+    """
+    if value is None:
+        return None
+    limit: int | None = None
+    if isinstance(value, float):
+        limit = int(value) if value.is_integer() else None
+    elif not isinstance(value, bool):
+        try:
+            limit = operator.index(value)  # type: ignore[arg-type]
+        except TypeError:
+            limit = None
+    if limit is None or limit < 0:
+        raise ValueError("max_messages must be None (unlimited) or a non-negative integer.")
+    return limit
 
 
 class PostgresHistoryProvider(HistoryProvider, BaseStore):
@@ -89,14 +112,9 @@ class PostgresHistoryProvider(HistoryProvider, BaseStore):
             retention=retention,
             pool_kwargs=pool_kwargs,
         )
-        # bool is an int, and a float such as inf or nan passes `< 0` only to fail every later save.
-        if max_messages is not None and (
-            isinstance(max_messages, bool) or not isinstance(max_messages, int) or max_messages < 0
-        ):
-            raise ValueError("max_messages must be None (unlimited) or a non-negative integer.")
         self.tenant_id = optional_text(tenant_id, "tenant_id")
         self.agent_id = optional_text(agent_id, "agent_id")
-        self.max_messages = max_messages
+        self.max_messages = _message_limit(max_messages)
 
     _SCOPE = sql.SQL(
         "application_id = %(app)s AND tenant_id = %(tenant)s AND agent_id = %(agent)s"
