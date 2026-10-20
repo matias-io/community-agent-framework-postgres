@@ -1,6 +1,6 @@
 # community-agent-framework-postgres
 
-PostgreSQL storage for [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) (MAF) in Python: chat history, `AgentSession` snapshots, workflow checkpoints and AG-UI thread snapshots, all in tables you already back up, with no vector extension and no embeddings.
+PostgreSQL storage for [Microsoft Agent Framework](https://github.com/microsoft/agent-framework) (MAF) in Python: chat history, `AgentSession` snapshots, workflow checkpoints and AG-UI thread snapshots in plain PostgreSQL tables, with no vector extension and no embeddings.
 
 Each class implements a MAF interface, so an agent or workflow uses it the way it uses MAF's in-memory or file stores. `PostgresPersistence` builds every store over one connection pool and runs the schema migrations. This is a community package by Matias Suxo Salinas. Microsoft does not maintain or support it.
 
@@ -23,10 +23,12 @@ Each store scopes its rows the way its closest Microsoft counterpart does. The h
 
 ## How it compares with Microsoft's packages
 
+As of agent-framework-core 1.22 and October 2026:
+
 | You need | Microsoft today | This package |
 |---|---|---|
-| Chat history in PostgreSQL | `VectorStoreHistoryProvider` (experimental) over `PostgresStore` from `agent-framework-postgres`, a pgvector connector. It reads a session's whole history and sorts it in Python, adds no cross-process locking, and leaves retention to the database | `PostgresHistoryProvider`: messages in insert order, one writer per session at a time, `max_messages` and TTL retention |
-| Workflow checkpoints | Cosmos DB, local files or Foundry hosting. A PostgreSQL store is proposed in [microsoft/agent-framework#8664](https://github.com/microsoft/agent-framework/pull/8664), not merged | `PostgresCheckpointStorage` |
+| Chat history in PostgreSQL | `VectorStoreHistoryProvider` (experimental) over `PostgresStore` from `agent-framework-postgres`, a pgvector connector, which can also search history by meaning | `PostgresHistoryProvider`: one row per message in insert order, saves to a session serialized across processes, `max_messages` and TTL retention |
+| Workflow checkpoints | Cosmos DB, local files or Foundry hosting. A PostgreSQL store is proposed in [microsoft/agent-framework#8664](https://github.com/microsoft/agent-framework/pull/8664) | `PostgresCheckpointStorage` |
 | `AgentSession` across processes | `FileSessionStore` | `PostgresSessionStore` |
 | AG-UI threads across restarts | `InMemoryAGUIThreadSnapshotStore` | `PostgresAGUIThreadSnapshotStore` |
 | Vector search and embeddings | `agent-framework-postgres` | Not provided. Use Microsoft's package next to this one |
@@ -111,7 +113,7 @@ Pass the checkpoint storage to `WorkflowBuilder`, and a workflow that dies part 
 
 ```python
 storage = hub.checkpoint_storage(scope="order-42")
-workflow = build(storage)  # the same graph, built fresh in the new process
+workflow = build(storage, crash=False)  # the same graph, built fresh in the new process
 latest = await storage.get_latest(workflow_name=workflow.name)
 if latest is not None:
     result = await workflow.run(checkpoint_id=latest.checkpoint_id)
@@ -252,7 +254,7 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped. See [CONTRIBUTING.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.2/CONTRIBUTING.md).
+Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped, or fail when the `CI` environment variable is set. See [CONTRIBUTING.md](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.2/CONTRIBUTING.md).
 
 ## Documentation
 

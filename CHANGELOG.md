@@ -10,9 +10,10 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 
 ### Added
 
-- Tested on `agent-framework-core` 1.22 and `agent-framework-ag-ui` 1.6, so those versions no longer log the untested-version warning.
-- Python 3.15 support: the full suite passes on 3.15.0b4 locally, and 3.15 is in the CI matrix. psycopg's binary wheel ships for 3.15. Some of MAF's and the extras' own dependencies do not yet: on 3.15, PyYAML (required by `agent-framework-core`) builds from source, and httptools (the `ag-ui` extra, through uvicorn) and frozenlist (the `azure` extra, through aiohttp) need a C compiler to build.
-- `samples/resume_after_restart.py`: a workflow killed after its first step finishes from its checkpoint in a new process.
+- Tested on `agent-framework-core` 1.22 and `agent-framework-ag-ui` 1.6, so those versions no longer log the untested-version warning. The full suite was run on each, and CI's latest leg runs the newest release on every change.
+- Python 3.15 support. The full suite passed on 3.15.0b4 locally, and the CI matrix runs the 3.15 release. psycopg's binary wheel ships for 3.15.
+- On Python 3.15, some dependencies of MAF and of the extras have no wheels yet: PyYAML, which `agent-framework-core` requires, builds from source, and httptools (the `ag-ui` extra, through uvicorn) and frozenlist (the `azure` extra, through aiohttp) need a C compiler.
+- `samples/resume_after_restart.py`: a workflow killed after its first step finishes from its checkpoint in a new process. A test runs it, and every other sample that needs only PostgreSQL.
 - `docs/connections.md`, which takes over the connection reference from the README and adds pool sizing.
 - A warning when a store or hub with a credential uses `sslmode=require` or `verify-ca`, which encrypt without fully verifying the server.
 
@@ -26,17 +27,20 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 
 ### Fixed
 
-- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. It takes about 20% longer on the benchmark in `docs/retention.md`.
+- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. On the benchmark in `docs/retention.md` a full purge took about 2.0 s, against 1.5 to 1.8 s before. A purge round locks at most 64 sessions, so it never holds more than a connection's share of the server's lock table.
 - On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
 - An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
 - `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
+- `max_messages` accepted `inf`, `nan` and `True`. A float then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for anything but `None` or a non-negative `int`.
 
 ### Security and CI
 
-- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels. The two MAF packages stay at their tested floor.
+- Ruff runs Microsoft agent-framework's rule set, less its Microsoft copyright-notice rule, and pyright treats a stale ignore comment or cast as an error, as Microsoft's does.
+- CI type-checks tests and samples with mypy, zuban, pyrefly, ty and pyright in Microsoft's relaxed profile, type-checks the documentation's code blocks, runs the unit tests on Windows, and fails below 85% coverage. Coverage is 98%.
+- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels, and adds the type checkers and twine. The two MAF packages stay at their tested floor.
 - `docker-compose.yml` publishes the development database on `127.0.0.1` only.
-- Workflows check out without persisted credentials. The release job builds without a cache, refuses a tag whose commit is not on `main`, and checks the built wheel and source archive before upload.
-- Dependabot also proposes updates to the locked development dependencies, leaving the two MAF packages at their tested floor.
+- Workflows check out without persisted credentials. The release job builds without a cache and refuses a tag whose commit is not on `main`. A separate job checks a downloaded copy of the built wheel and source archive with the locked twine and an import, so nothing a check installs can change what is published.
+- Dependabot also proposes updates to the locked development dependencies, except the two MAF packages.
 - In CI, a missing `POSTGRES_TEST_CONNECTION_STRING` fails the run instead of skipping the database tests.
 
 ## [0.1.1] - 2026-10-11

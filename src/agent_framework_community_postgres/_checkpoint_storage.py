@@ -32,8 +32,9 @@ class PostgresCheckpointStorage(BaseStore):
     way Foundry hosting scopes its stores) and the checkpoint id. Here ``scope`` names one run; the
     AG-UI snapshot store's ``scope`` is an authorization boundary instead. "Latest" is the last row
     written in a scope, whatever clock produced it: saves in one scope take turns on a lock, so
-    parallel runs should each have their own scope. Saving an existing id replaces its content and
-    keeps its position, as the framework's own stores do.
+    parallel runs should each have their own scope. Saving an existing id replaces its content, as
+    ``FileCheckpointStorage`` and ``CosmosCheckpointStorage`` do, and keeps its place in write order;
+    those two order by ``timestamp`` instead.
     """
 
     PAYLOAD_FORMAT: ClassVar[str] = "agent-framework.python.checkpoint.v1"
