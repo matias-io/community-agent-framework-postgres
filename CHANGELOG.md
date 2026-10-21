@@ -27,7 +27,7 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 
 ### Fixed
 
-- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. On the benchmark in `docs/retention.md` a full purge took about 2.0 s, against 1.5 to 1.8 s before. A purge round locks at most 64 sessions, so it never holds more than a connection's share of the server's lock table.
+- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. On the benchmark in `docs/retention.md` a full purge took about 2.0 s, against 1.5 to 1.8 s before. A purge round locks at most 64 sessions, so outside a caller's own transaction it never holds more than a connection's share of the server's lock table.
 - On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
 - An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
 - `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
@@ -37,7 +37,7 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 
 - Ruff runs Microsoft agent-framework's rule set, less its Microsoft copyright-notice rule, and pyright treats a stale ignore comment or cast as an error, as Microsoft's does.
 - CI type-checks tests and samples with mypy, zuban, pyrefly, ty and pyright in Microsoft's relaxed profile, type-checks the documentation's code blocks, runs the unit tests on Windows, and fails below 85% coverage. Coverage is 98%.
-- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels, and adds the type checkers and twine. The two MAF packages stay at their tested floor.
+- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels, and adds the type checkers, pytest-cov and twine. The two MAF packages stay at their tested floor.
 - `docker-compose.yml` publishes the development database on `127.0.0.1` only.
 - Workflows check out without persisted credentials. The release job builds without a cache and refuses a tag whose commit is not on `main`. A separate job checks a downloaded copy of the built wheel and source archive with the locked twine and an import, so nothing a check installs can change what is published.
 - Dependabot also proposes updates to the locked development dependencies, except the two MAF packages.

@@ -27,7 +27,9 @@ jobs:
       - run: uv run pyright
 
   # Microsoft agent-framework's "Test Typing Checks" and "Samples & Markdown" jobs: tests and samples are
-  # type-checked in its relaxed profile, and the documentation's code blocks against the installed packages.
+  # type-checked in its relaxed profile, and the documentation's code blocks too. That last step adds
+  # agent-framework-openai, which needs a newer agent-framework-core than the locked floor, so it checks the
+  # snippets against the newest MAF rather than the lock.
   test-typing:
     runs-on: ubuntu-latest
     steps:

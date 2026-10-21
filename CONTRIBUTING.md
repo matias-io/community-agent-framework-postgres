@@ -57,7 +57,7 @@ Coverage must stay at 85% or more, as Microsoft agent-framework requires:
 uv run pytest --cov=agent_framework_community_postgres --cov-branch --cov-fail-under=85
 ```
 
-Tests and samples are also type-checked, in Microsoft agent-framework's relaxed profile: the checkers report real errors in how the public API is used, without requiring every test function to be annotated. Test modules share names across `tests/unit`, `tests/integration` and `tests/conformance`, so mypy and zuban check one directory at a time. The last command type-checks the Python blocks in the documentation; the README's agent example needs `agent-framework-openai`.
+Tests and samples are also type-checked, in Microsoft agent-framework's relaxed profile: the checkers report real errors in how the public API is used, without requiring every test function to be annotated. Test modules share names across `tests/unit`, `tests/integration` and `tests/conformance`, so mypy and zuban check one directory at a time. The last command type-checks the Python blocks in the documentation; the README's agent example needs `agent-framework-openai`, which pulls in the newest `agent-framework-core`, so this check runs against the newest MAF rather than the lock.
 
 ```bash
 uv sync --all-extras --group typing
