@@ -54,4 +54,5 @@ async def test_a_workflow_killed_halfway_finishes_in_a_new_process(sample_env: d
     assert "output: ['HELLO!']" in resumed.stdout
     # The sample deletes its checkpoints once the run finishes.
     again = await asyncio.to_thread(_run, sample_env, "resume_after_restart.py", "resume")
+    assert again.returncode == 0, again.stderr
     assert "nothing to resume" in again.stdout
