@@ -28,6 +28,9 @@ TEST_DSN_ENV = "POSTGRES_TEST_CONNECTION_STRING"
 def test_dsn() -> str:
     dsn = os.getenv(TEST_DSN_ENV, "").strip()
     if not dsn:
+        # In CI a missing database would otherwise turn the whole database suite into a green run of skips.
+        if os.getenv("CI"):
+            pytest.fail(f"{TEST_DSN_ENV} is not set; CI must run the database tests.")
         pytest.skip(f"Set {TEST_DSN_ENV} to run integration tests.")
     return dsn
 

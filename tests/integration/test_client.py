@@ -1,9 +1,11 @@
 import asyncio
 import time
+from typing import Any
 
 import pytest
 from agent_framework import AgentSession, SecretString
 from psycopg import AsyncConnection, sql
+from psycopg.conninfo import make_conninfo
 from psycopg.errors import UndefinedTable
 from psycopg.pq import TransactionStatus
 from psycopg_pool import AsyncConnectionPool, PoolClosed
@@ -36,7 +38,7 @@ async def test_driver_errors_are_wrapped(test_dsn: str) -> None:
 
 
 async def test_borrowed_pool_is_opened_on_demand(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(test_dsn, open=False)
     try:
         client = ClientHandle(None, pool)
         async with client.connection() as connection:
@@ -50,7 +52,7 @@ async def test_borrowed_pool_is_opened_on_demand(test_dsn: str) -> None:
 
 
 async def test_closed_borrowed_pool_raises_storage_error(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(test_dsn, open=False)
     await pool.open()
     await pool.close()
     with pytest.raises(PostgresStorageError) as info:
@@ -69,10 +71,7 @@ async def test_borrowed_connection_is_used_and_not_closed(test_dsn: str) -> None
         assert not connection.closed
 
 
-_UNREACHABLE = [
-    "postgresql://postgres:wrong@127.0.0.1:5433/agent_framework",
-    "host=127.0.0.1 port=1 dbname=x",
-]
+_CLOSED_PORT = "host=127.0.0.1 port=1 dbname=x"
 _CLEAR = (
     "No PostgreSQL connection became available within 10 seconds: the database is unreachable or every pooled"
     " connection is busy; psycopg_pool logs the driver's reason."
@@ -89,8 +88,13 @@ async def _fail_once(handle: ClientHandle) -> None:
 
 
 @pytest.mark.timeout(40)
-@pytest.mark.parametrize("dsn", _UNREACHABLE)
-async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
+@pytest.mark.parametrize("unreachable", ["wrong-password", "closed-port"])
+async def test_unreachable_database_fails_fast_on_every_call(unreachable: str, request: pytest.FixtureRequest) -> None:
+    # The wrong password goes to the test database itself, wherever it listens.
+    if unreachable == "wrong-password":
+        dsn = make_conninfo(request.getfixturevalue("test_dsn"), password="wrong")
+    else:
+        dsn = _CLOSED_PORT
     client = ClientHandle(SecretString(dsn), None)
     try:
         await _fail_once(client)
@@ -103,7 +107,7 @@ async def test_unreachable_database_fails_fast_on_every_call(dsn: str) -> None:
 
 @pytest.mark.timeout(40)
 async def test_concurrent_first_calls_both_fail_cleanly() -> None:
-    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    client = ClientHandle(SecretString(_CLOSED_PORT), None)
     try:
         results = await asyncio.gather(_fail_once(client), _fail_once(client), return_exceptions=True)
         assert results == [None, None]
@@ -113,7 +117,7 @@ async def test_concurrent_first_calls_both_fail_cleanly() -> None:
 
 @pytest.mark.timeout(40)
 async def test_child_of_an_unreachable_owned_handle_gets_the_clear_message() -> None:
-    client = ClientHandle(SecretString(_UNREACHABLE[1]), None)
+    client = ClientHandle(SecretString(_CLOSED_PORT), None)
     try:
         await _fail_once(client.child())
     finally:
@@ -136,7 +140,9 @@ async def test_concurrent_calls_over_one_borrowed_connection_are_serialized(test
 
 @pytest.mark.timeout(30)
 async def test_an_exhausted_borrowed_pool_names_busy_connections(test_dsn: str) -> None:
-    pool = AsyncConnectionPool(test_dsn, open=False, min_size=1, max_size=1, timeout=2.0)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(
+        test_dsn, open=False, min_size=1, max_size=1, timeout=2.0
+    )
     await pool.open()
     try:
         async with pool.connection():
@@ -182,3 +188,13 @@ async def test_a_read_on_a_borrowed_non_autocommit_connection_leaves_no_transact
                 sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, "af_sessions"))
             )
             assert await cursor.fetchone() == (1,)
+
+
+async def test_a_dead_borrowed_connection_is_not_retryable(test_dsn: str) -> None:
+    connection = await AsyncConnection.connect(test_dsn, autocommit=True)
+    client = ClientHandle(None, connection)
+    await connection.close()
+    with pytest.raises(PostgresStorageError) as info:
+        async with client.connection(transactional=False) as borrowed:
+            await borrowed.execute("SELECT 1")
+    assert info.value.retryable is False

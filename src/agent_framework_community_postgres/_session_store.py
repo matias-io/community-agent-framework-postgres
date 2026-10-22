@@ -92,7 +92,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
         """Store the session, replacing any existing snapshot."""
         SessionStore.validate_session_id(session_id)
         snapshot = encode_jsonb(session.to_dict(), what="Session state")
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(
                 sql.SQL(
                     "INSERT INTO {sessions} (application_id, session_id, snapshot, snapshot_version, expires_at)"
@@ -114,7 +114,7 @@ class PostgresSessionStore(SessionStore, BaseStore):
     async def delete(self, session_id: str) -> None:
         """Remove the stored session, if any."""
         SessionStore.validate_session_id(session_id)
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             await connection.execute(
                 sql.SQL("DELETE FROM {sessions} WHERE application_id = %(app)s AND session_id = %(id)s").format(
                     sessions=self._names.table("sessions")

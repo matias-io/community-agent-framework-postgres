@@ -20,6 +20,25 @@ def test_readme_names_every_public_store() -> None:
     assert "agent-framework-core" in readme and "1.20" in readme
 
 
+def test_every_tested_minor_is_in_the_readme_and_the_compatibility_guide() -> None:
+    from agent_framework_community_postgres import _framework
+
+    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").splitlines()
+    guide = (ROOT / "docs" / "compatibility.md").read_text(encoding="utf-8").splitlines()
+    core_row = next(line for line in readme if line.startswith("| `agent-framework-core` |"))
+    ag_ui_row = next(line for line in readme if line.startswith("| `agent-framework-ag-ui`"))
+    release_row = next(line for line in guide if line.startswith(f"| {version} |"))
+    tested_core = core_row.rsplit("|", 2)[1]
+    tested_ag_ui = ag_ui_row.rsplit("|", 2)[1]
+    for minor in _framework.TESTED_CORE:
+        assert f"{minor}." in tested_core, minor
+        assert f"{minor}." in release_row.split("|")[2], minor
+    for minor in _framework.TESTED_AG_UI:
+        assert f"{minor}." in tested_ag_ui, minor
+        assert f"{minor}." in release_row.split("|")[3], minor
+
+
 def test_docs_pages_exist_and_are_linked_from_readme() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for page in (
@@ -32,6 +51,7 @@ def test_docs_pages_exist_and_are_linked_from_readme() -> None:
         "migrations",
         "compatibility",
         "azure-entra",
+        "connections",
     ):
         assert (ROOT / "docs" / f"{page}.md").exists(), page
         assert re.search(rf"docs/{page}\.md", readme), page

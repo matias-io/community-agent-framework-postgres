@@ -32,7 +32,7 @@ PostgresCheckpointStorage(*, application_id, tenant_id=None, scope=None, allowed
 | `scope` | `None` | Keeps one workflow's checkpoints apart, for example per conversation or response. `''` raises `ValueError` |
 | `allowed_checkpoint_types` | `None` | Extra types the decoder may restore, as `"module:QualifiedName"` strings |
 
-The connection arguments and `retention` are the same on every store. See [Standalone use](../README.md#standalone-use). On the hub, call `hub.checkpoint_storage(tenant_id=..., scope=..., allowed_checkpoint_types=...)`.
+The connection arguments and `retention` are the same on every store. See [connections.md](connections.md). On the hub, call `hub.checkpoint_storage(tenant_id=..., scope=..., allowed_checkpoint_types=...)`.
 
 ## Encoding
 
@@ -51,7 +51,7 @@ Any database principal with `INSERT` or `UPDATE` on `af_checkpoints` can write a
 
 - `save` encodes the checkpoint and decodes it again under this store's allowed types before it writes. A checkpoint that would not restore raises `WorkflowCheckpointException` and nothing is written. MAF's `FileCheckpointStorage` does the same check.
 - Rows are keyed by `application_id`, `tenant_id`, `scope` and `checkpoint_id`. Without `tenant_id` and `scope`, every instance with the same `application_id` shares checkpoints for a `workflow_name`. MAF's protocol only knows `workflow_name`. When a workflow runs once per conversation, pass the conversation id as `scope`.
-- Saving an existing `checkpoint_id` again replaces its content and keeps its position in the order, as MAF's in-memory and file storage do.
+- Saving an existing `checkpoint_id` again replaces its content and keeps its place in write order. MAF's file and Cosmos DB storage also overwrite a re-saved id, but order by `timestamp`; see [Differences from MAF's own stores](#differences-from-mafs-own-stores).
 - Saves in one `application_id`, `tenant_id` and `scope` take turns on a transaction-scoped advisory lock, so `sequence` order is commit order.
 - A timestamp without a time zone is read as UTC. A timestamp `datetime.fromisoformat` cannot parse raises `WorkflowCheckpointException`.
 - `list_checkpoints` and `list_checkpoint_ids` return checkpoints in write order, oldest first. `get_latest` returns the last checkpoint written, whatever clock produced its `timestamp`.
@@ -108,4 +108,4 @@ with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "w
 
 ## Retention
 
-Each checkpoint is its own row, and `save` sets its `expires_at` to now plus the TTL. A later checkpoint does not extend an earlier one. Saving the same `checkpoint_id` again resets that row's expiry. `purge()` deletes expired rows one by one, so a long-running workflow loses its oldest checkpoints first. `purge()` covers this store's scope. Checkpoints are always deleted, never tombstoned, because a partial checkpoint cannot be resumed. See [retention.md](retention.md).
+Each checkpoint is its own row, and `save` sets its `expires_at` to now plus the TTL. A later checkpoint does not extend an earlier one. Saving the same `checkpoint_id` again resets that row's expiry. `purge()` deletes expired rows in batches of 1000. Because each checkpoint expires a TTL after its own save, a long-running workflow loses its oldest checkpoints first. `purge()` covers this store's scope. Checkpoints are always deleted, never tombstoned, because a partial checkpoint cannot be resumed. See [retention.md](retention.md).

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Self
 
@@ -13,7 +14,7 @@ from ._checkpoint_storage import PostgresCheckpointStorage
 from ._client import PostgresClient, TableNames, create_client, require_text
 from ._entra import EntraCredential
 from ._framework import log_untested_once
-from ._history_provider import PostgresHistoryProvider, whole_session_expired
+from ._history_provider import PostgresHistoryProvider, purge_history
 from ._leases import PostgresLeases
 from ._migrations import LOCK_TIMEOUT, MigrationReport, current_version, migrate, pending_versions
 from ._retention import PurgeReport, RetentionMode, RetentionPolicy, purge_rows
@@ -22,9 +23,16 @@ from ._session_store import PostgresSessionStore
 if TYPE_CHECKING:
     from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
-# Another application id, schema or prefix would escape the hub's migrations or purge; another client
-# or credential would escape its pool and its close.
-_HUB_OWNED = ("application_id", "client", "credential", "pool_kwargs", "schema", "table_prefix")
+
+@dataclass(frozen=True, repr=False)
+class _HubPolicy(RetentionPolicy):
+    """The factories' default ``retention``: the hub's own policy. ``None`` still means no expiry, as in 0.1.1."""
+
+    def __repr__(self) -> str:
+        return "<the hub's retention policy>"
+
+
+_HUB_POLICY = _HubPolicy()
 
 
 class PostgresPersistence:
@@ -95,28 +103,51 @@ class PostgresPersistence:
         """The schema version the database is at; 0 before the first migration."""
         return await current_version(self._client, self.names)
 
-    def _common(self, overrides: dict[str, Any]) -> dict[str, Any]:
-        for key in _HUB_OWNED:
-            if key in overrides:
-                raise TypeError(f"{key} is set by the hub and cannot be overridden.")
-        base: dict[str, Any] = {
+    def _shared(self, retention: RetentionPolicy | None) -> dict[str, Any]:
+        # The hub owns the application id, schema and prefix (its migrations and purge cover them) and the
+        # client (its pool and its close), so the factories take none of them; only retention can differ.
+        return {
             "application_id": self.application_id,
             "client": self._client,
             "schema": self.names.schema,
             "table_prefix": self.names.prefix,
-            "retention": self.retention,
+            "retention": self.retention if retention is _HUB_POLICY else retention,
         }
-        return base | overrides
 
     def history_provider(
-        self, source_id: str = PostgresHistoryProvider.DEFAULT_SOURCE_ID, **kwargs: Any
+        self,
+        source_id: str = PostgresHistoryProvider.DEFAULT_SOURCE_ID,
+        *,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        max_messages: int | None = None,
+        load_messages: bool = True,
+        store_inputs: bool = True,
+        store_context_messages: bool = False,
+        store_context_from: set[str] | None = None,
+        store_outputs: bool = True,
+        retention: RetentionPolicy | None = _HUB_POLICY,
     ) -> PostgresHistoryProvider:
-        """A history provider on the shared pool; keyword arguments as on the class."""
-        return PostgresHistoryProvider(source_id, **self._common(kwargs))
+        """A history provider on the shared pool; arguments as on the class, ``retention`` defaulting to the hub's.
 
-    def session_store(self, **kwargs: Any) -> PostgresSessionStore:
-        """A session store on the shared pool."""
-        return PostgresSessionStore(**self._common(kwargs))
+        Pass ``retention=None`` or ``RetentionPolicy()`` for a store whose rows never expire.
+        """
+        return PostgresHistoryProvider(
+            source_id,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            max_messages=max_messages,
+            load_messages=load_messages,
+            store_inputs=store_inputs,
+            store_context_messages=store_context_messages,
+            store_context_from=store_context_from,
+            store_outputs=store_outputs,
+            **self._shared(retention),
+        )
+
+    def session_store(self, *, retention: RetentionPolicy | None = _HUB_POLICY) -> PostgresSessionStore:
+        """A session store on the shared pool; ``retention`` defaults to the hub's."""
+        return PostgresSessionStore(**self._shared(retention))
 
     def checkpoint_storage(
         self,
@@ -124,18 +155,23 @@ class PostgresPersistence:
         tenant_id: str | None = None,
         scope: str | None = None,
         allowed_checkpoint_types: list[str] | None = None,
-        **kwargs: Any,
+        retention: RetentionPolicy | None = _HUB_POLICY,
     ) -> PostgresCheckpointStorage:
         """A checkpoint storage on the shared pool, optionally scoped to one tenant and one conversation."""
         return PostgresCheckpointStorage(
-            tenant_id=tenant_id, scope=scope, allowed_checkpoint_types=allowed_checkpoint_types, **self._common(kwargs)
+            tenant_id=tenant_id,
+            scope=scope,
+            allowed_checkpoint_types=allowed_checkpoint_types,
+            **self._shared(retention),
         )
 
-    def thread_snapshot_store(self, **kwargs: Any) -> PostgresAGUIThreadSnapshotStore:
+    def thread_snapshot_store(
+        self, *, retention: RetentionPolicy | None = _HUB_POLICY
+    ) -> PostgresAGUIThreadSnapshotStore:
         """An AG-UI thread snapshot store on the shared pool (needs the ``ag-ui`` extra)."""
         from ._thread_snapshot_store import PostgresAGUIThreadSnapshotStore
 
-        return PostgresAGUIThreadSnapshotStore(**self._common(kwargs))
+        return PostgresAGUIThreadSnapshotStore(**self._shared(retention))
 
     def leases(self) -> PostgresLeases:
         """The lease table on the shared pool."""
@@ -152,13 +188,17 @@ class PostgresPersistence:
         A row is expired when its ``expires_at``, stamped by whichever policy wrote it, has
         passed; the hub needs no policy of its own. ``mode`` defaults to the hub policy's mode.
         Each table is purged in batches, one transaction per batch. A history session is purged
-        only once every one of its messages has expired.
+        whole, and only once every one of its messages has expired.
         """
         chosen = RetentionPolicy(mode=mode).mode if mode is not None else self.retention.mode
         where = sql.SQL("application_id = %(app)s")
         params = {"app": self.application_id}
+        counts: dict[str, int] = {
+            f"{self.names.prefix}history_messages": await purge_history(
+                self._client, self.names, application_id=self.application_id
+            )
+        }
         plan: list[tuple[str, sql.Composable, sql.Composable | None, bool]] = [
-            ("history_messages", whole_session_expired(self.names.table("history_messages")), None, False),
             ("sessions", where, sql.SQL("snapshot = NULL"), True),
             ("checkpoints", where, None, False),
             (
@@ -169,7 +209,6 @@ class PostgresPersistence:
             ),
             ("leases", where, None, False),
         ]
-        counts: dict[str, int] = {}
         # One transaction per batch: row locks are never held across tables, so a long purge cannot
         # deadlock with, say, a history trim on the same session.
         for table, table_where, tombstone, tombstone_allowed in plan:

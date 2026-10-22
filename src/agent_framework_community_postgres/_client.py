@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import os
 import re
 import weakref
@@ -22,6 +23,8 @@ from psycopg_pool import AsyncConnectionPool, PoolClosed, PoolTimeout
 if TYPE_CHECKING:
     # _entra imports this module's error type, so it is imported where a pool is built.
     from ._entra import EntraCredential
+
+logger = logging.getLogger(__name__)
 
 PostgresClient: TypeAlias = AsyncConnection[Any] | AsyncConnectionPool[AsyncConnection[Any]]
 
@@ -50,6 +53,8 @@ _POOL_DEFAULTS: dict[str, Any] = {"min_size": 1, "max_size": 10, "timeout": floa
 # (serialization, deadlock), insufficient resources, operator intervention, lock not available.
 _RETRYABLE_SQLSTATES = ("08", "40", "53", "57P0", "55P03")
 _WEAK_SSLMODES = ("disable", "allow", "prefer")
+# Both encrypt without checking the server's host name; require can still validate a configured root CA.
+_UNVERIFIED_SSLMODES = ("require", "verify-ca")
 # One lock per borrowed connection, shared by every handle over it: a psycopg connection runs one
 # transaction block at a time, so overlapping calls from two tasks would nest out of order.
 _CONNECTION_LOCKS: weakref.WeakKeyDictionary[AsyncConnection[Any], asyncio.Lock] = weakref.WeakKeyDictionary()
@@ -157,7 +162,15 @@ def _refuse_weak_sslmode(options: Mapping[str, Any], kwargs: Mapping[str, Any]) 
         if value in _WEAK_SSLMODES:
             raise ValueError(
                 f"{source}={value} sends the Microsoft Entra ID token without verifying the server;"
-                " use verify-full (the default with a credential) or require."
+                " use verify-full, the default with a credential."
+            )
+        if value in _UNVERIFIED_SSLMODES:
+            logger.warning(
+                "%s=%s encrypts the connection but does not verify the server's %s, so the Microsoft Entra ID"
+                " token can reach an impostor; use verify-full, the default with a credential.",
+                source,
+                value,
+                "host name",
             )
         return
 
@@ -202,7 +215,7 @@ class ClientHandle:
             )
         if pool_kwargs is not None and client is not None:
             raise ValueError("pool_kwargs cannot be combined with client; it configures a pool this handle owns.")
-        if client is not None and not isinstance(client, (AsyncConnection, AsyncConnectionPool)):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if client is not None and not isinstance(client, (AsyncConnection, AsyncConnectionPool)):
             raise TypeError("client must be a psycopg AsyncConnection or AsyncConnectionPool.")
         self.owned = client is None
         self.client: PostgresClient
@@ -331,6 +344,9 @@ class ClientHandle:
             retryable = is_retryable(sqlstate) or (
                 sqlstate is None and isinstance(exc, OperationalError) and not isinstance(exc, PoolClosed)
             )
+            if isinstance(self.client, AsyncConnection) and self.client.closed:
+                # A retry would get the same dead connection; only a pool hands out a fresh one.
+                retryable = False
             raise PostgresStorageError(
                 "PostgreSQL operation failed; see the chained driver exception.", sqlstate=sqlstate, retryable=retryable
             ) from exc

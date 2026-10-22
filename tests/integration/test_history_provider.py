@@ -75,26 +75,36 @@ async def test_a_repeated_input_is_kept_not_dropped_as_a_replay(history: Postgre
 
 
 async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames) -> None:
-    kwargs = {"application_id": "tests", "client": client.client, "schema": migrated.schema}
-    a = PostgresHistoryProvider(tenant_id="t1", **kwargs)
-    b = PostgresHistoryProvider(tenant_id="t2", **kwargs)
-    other_source = PostgresHistoryProvider("audit", tenant_id="t1", **kwargs)
+    def provider(
+        source_id: str = PostgresHistoryProvider.DEFAULT_SOURCE_ID, *, tenant_id: str
+    ) -> PostgresHistoryProvider:
+        return PostgresHistoryProvider(
+            source_id, application_id="tests", tenant_id=tenant_id, client=client.client, schema=migrated.schema
+        )
+
+    a = provider(tenant_id="t1")
+    b = provider(tenant_id="t2")
+    other_source = provider("audit", tenant_id="t1")
     await a.save_messages("s", [Message(role="user", contents=["a"])])
     assert await b.get_messages("s") == []
     assert await other_source.get_messages("s") == []
 
 
-async def test_max_messages_keeps_the_newest(client: ClientHandle, migrated: TableNames) -> None:
+@pytest.mark.parametrize(("limit", "expected"), [(2, ["b", "c"]), (True, ["c"])])
+async def test_max_messages_keeps_the_newest(
+    client: ClientHandle, migrated: TableNames, limit: int, expected: list[str]
+) -> None:
     history = PostgresHistoryProvider(
-        application_id="tests", client=client.client, schema=migrated.schema, max_messages=2
+        application_id="tests", client=client.client, schema=migrated.schema, max_messages=limit
     )
     await history.save_messages("s", [Message(role="user", contents=[t]) for t in ("a", "b", "c")])
-    assert _texts(await history.get_messages("s")) == ["b", "c"]
+    assert _texts(await history.get_messages("s")) == expected
 
 
-async def test_max_messages_zero_stores_nothing(client: ClientHandle, migrated: TableNames) -> None:
+@pytest.mark.parametrize("limit", [0, False])
+async def test_max_messages_zero_stores_nothing(client: ClientHandle, migrated: TableNames, limit: int) -> None:
     history = PostgresHistoryProvider(
-        application_id="tests", client=client.client, schema=migrated.schema, max_messages=0
+        application_id="tests", client=client.client, schema=migrated.schema, max_messages=limit
     )
     await history.save_messages("s", [Message(role="user", contents=["a"])])
     assert await history.get_messages("s") == []
@@ -129,7 +139,9 @@ async def test_concurrent_saves_under_repeatable_read(test_dsn: str, schema: str
     async def repeatable_read(connection: AsyncConnection[Any]) -> None:
         await connection.execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ")
 
-    pool = AsyncConnectionPool(test_dsn, open=False, kwargs={"autocommit": True}, configure=repeatable_read)
+    pool: AsyncConnectionPool[AsyncConnection[Any]] = AsyncConnectionPool(
+        test_dsn, open=False, kwargs={"autocommit": True}, configure=repeatable_read
+    )
     async with pool, PostgresPersistence(application_id="tests", client=pool, schema=schema) as hub:
         await hub.migrate()
         provider = hub.history_provider()
@@ -169,12 +181,24 @@ async def test_undecodable_row_in_the_window_fails_the_save(persistence: Postgre
         await provider.save_messages("s", [Message(role="user", contents=["b"])])
 
 
-async def test_clear_is_serialized_with_saves(persistence: PostgresPersistence) -> None:
+async def test_clear_and_save_wait_for_the_session_lock(persistence: PostgresPersistence, test_dsn: str) -> None:
     provider = persistence.history_provider()
-    big = [Message(role="user", contents=[str(i)]) for i in range(200)]
-    results = await asyncio.gather(provider.save_messages("s", big), provider.clear("s"), return_exceptions=True)
-    assert all(r is None for r in results)
-    assert len(await provider.get_messages("s")) in (0, 200)
+    await provider.save_messages("s", [Message(role="user", contents=["a"])])
+    async with await AsyncConnection.connect(test_dsn) as blocker:
+        # The key every writer of session "s" takes: schema, prefix, application, tenant, agent, source, session.
+        await blocker.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(concat_ws(chr(31), %s::text, 'af_', 'tests', '', '',"
+            " 'postgres_history', 's'), 0))",
+            (persistence.names.schema,),
+        )
+        clear = asyncio.create_task(provider.clear("s"))
+        save = asyncio.create_task(provider.save_messages("s", [Message(role="user", contents=["b"])]))
+        done, _ = await asyncio.wait({clear, save}, timeout=0.5)
+        assert done == set()
+        assert [m.text for m in await provider.get_messages("s")] == ["a"]
+        await blocker.rollback()
+        await asyncio.wait_for(asyncio.gather(clear, save), 5)
+    assert [m.text for m in await provider.get_messages("s")] in ([], ["b"])
 
 
 async def test_list_sessions_pages(persistence: PostgresPersistence) -> None:

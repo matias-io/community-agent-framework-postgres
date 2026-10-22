@@ -49,7 +49,27 @@ uv run ruff format --check .
 uv run pyright
 ```
 
-Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped. Each integration test creates its own schema and drops it afterwards.
+Without `POSTGRES_TEST_CONNECTION_STRING`, the integration and conformance tests are skipped, or fail when the `CI` environment variable is set. Each integration test creates its own schema and drops it afterwards.
+
+Coverage must stay at 85% or more, as Microsoft agent-framework requires:
+
+```bash
+uv run pytest --cov=agent_framework_community_postgres --cov-branch --cov-fail-under=85
+```
+
+Tests and samples are also type-checked, in Microsoft agent-framework's relaxed profile: the checkers report real errors in how the public API is used, without requiring every test function to be annotated. Test modules share names across `tests/unit`, `tests/integration` and `tests/conformance`, so mypy and zuban check one directory at a time. The last command type-checks the Python blocks in the documentation; the README's agent example needs `agent-framework-openai`, which pulls in the newest `agent-framework-core`, so this check runs against the newest MAF rather than the lock.
+
+```bash
+uv sync --all-extras --group typing
+for directory in tests/unit tests/integration tests/conformance; do uv run mypy "$directory"; uv run zuban mypy "$directory"; done
+uv run mypy samples
+uv run pyrefly check
+uv run ty check
+uv run pyright -p pyrightconfig.tests.json
+uv run --with "agent-framework-openai>=1.17.0,<2" python scripts/check_markdown_code.py README.md docs/*.md
+```
+
+Ruff runs Microsoft agent-framework's rule set with preview rules on, less its Microsoft copyright-notice rule, and pyright treats a stale ignore comment or cast as an error, as Microsoft's does.
 
 ## Commit messages
 
@@ -78,7 +98,7 @@ Import private Agent Framework names only in `src/agent_framework_community_post
 
 Every action in `.github/workflows/` is pinned by commit SHA, with the tag or branch it came from in a comment. To update one, resolve the new tag to its commit (dereference an annotated tag to the commit it points at) and change the SHA and the comment together. Dependabot (`.github/dependabot.yml`) checks the pins weekly and opens a pull request that does both.
 
-`ci.yml` runs the locked MAF versions on Python 3.11 to 3.14 against PostgreSQL 16 and 17. It also runs the newest MAF release the declared ranges allow on each Python version against PostgreSQL 17. All these jobs block a merge. `canary.yml` runs every Monday against the newest MAF release: the compatibility check logs a warning on a newer minor and the suite still runs. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` runs the full suite against PostgreSQL 17 before it builds, and uploads only if that passes and a reviewer approves.
+`ci.yml` runs the locked MAF versions on Python 3.11 to 3.15 against PostgreSQL 16 and 17, the unit tests on Windows, the type checks above and the coverage gate. It also runs the newest MAF release the declared ranges allow on each Python version against PostgreSQL 17. The release procedure requires every job to pass before merging. Branch protection must be configured separately to enforce that policy in GitHub. `canary.yml` runs every Monday against the newest MAF release: the compatibility check logs a warning on a newer minor and the suite still runs. When it passes on a new minor, add that minor to `TESTED_CORE` or `TESTED_AG_UI` in `_framework.py` and to `docs/compatibility.md` in the next release; when it fails, the fix ships in a patch release. GitHub disables a scheduled workflow after 60 days without repository activity, so check that the canary is still enabled. `release.yml` checks that the tagged commit is on `main`, runs the full suite against PostgreSQL 17, builds without a cache, checks the wheel and source archive with `twine check` and an import of the built wheel, and uploads only if all that passes and a reviewer approves. In CI, the database tests fail instead of skipping when `POSTGRES_TEST_CONNECTION_STRING` is missing.
 
 ## Releasing
 

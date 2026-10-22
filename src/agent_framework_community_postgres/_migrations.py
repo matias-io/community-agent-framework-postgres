@@ -156,12 +156,10 @@ def render(names: TableNames, versions: Sequence[int] | None = None) -> str:
         parts.append("BEGIN;")
         parts.append(timeout + ";")
         parts.extend(statement.as_string() + ";" for statement in MIGRATIONS[version - 1](names))
-        parts.append(
-            sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})")  # noqa: S608
-            .format(migrations=names.table("migrations"), version=sql.Literal(version))
-            .as_string()
-            + ";"
+        record = sql.SQL("INSERT INTO {migrations} (version) VALUES ({version})").format(
+            migrations=names.table("migrations"), version=sql.Literal(version)
         )
+        parts.append(record.as_string() + ";")
         parts.append("COMMIT;")
     return "\n".join(parts) + "\n"
 
@@ -224,9 +222,15 @@ async def migrate(
             )
             if await cursor.fetchone() is not None:
                 continue  # another process applied it while we waited for the lock
+            # Inside a caller's transaction this block is a savepoint, and SET LOCAL would outlive it until
+            # the caller's commit; the caller's own setting is put back after the DDL.
+            cursor = await connection.execute("SELECT current_setting('lock_timeout')")
+            previous = await cursor.fetchone()
             await connection.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(timeout))
             for statement in MIGRATIONS[version - 1](names):
                 await connection.execute(statement)
+            if previous is not None:
+                await connection.execute("SELECT set_config('lock_timeout', %s, true)", (previous[0],))
             await connection.execute(
                 sql.SQL("INSERT INTO {migrations} (version) VALUES (%s)").format(migrations=names.table("migrations")),
                 (version,),

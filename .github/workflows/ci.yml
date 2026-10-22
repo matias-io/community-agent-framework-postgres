@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       # --locked fails the job when uv.lock no longer matches pyproject.toml, instead of re-locking silently.
       - run: uv sync --locked --all-extras
@@ -24,12 +26,75 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pyright
 
+  # Microsoft agent-framework's "Test Typing Checks" and "Samples & Markdown" jobs: tests and samples are
+  # type-checked in its relaxed profile, and the documentation's code blocks too. That last step adds
+  # agent-framework-openai, which needs a newer agent-framework-core than the locked floor, so it checks the
+  # snippets against the newest MAF rather than the lock.
+  test-typing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked --all-extras --group typing
+      # Test modules share names across tests/unit, tests/integration and tests/conformance, so mypy and
+      # zuban check one directory at a time.
+      - run: |
+          for directory in tests/unit tests/integration tests/conformance; do
+            uv run --no-sync mypy "$directory"
+            uv run --no-sync zuban mypy "$directory"
+          done
+          uv run --no-sync mypy samples
+      - run: uv run --no-sync pyrefly check
+      - run: uv run --no-sync ty check
+      - run: uv run --no-sync pyright -p pyrightconfig.tests.json
+      - run: uv run --no-sync --with "agent-framework-openai>=1.17.0,<2" python scripts/check_markdown_code.py README.md docs/*.md
+
+  # The package documents Windows-specific behaviour, so the unit tests run there too. Windows runners have
+  # no PostgreSQL service container, so the database suite runs on Linux only.
+  unit-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked --all-extras
+      - run: uv run --no-sync pytest tests/unit
+
+  # Microsoft agent-framework fails a pull request below 85% test coverage.
+  coverage:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_framework
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agent_framework"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - run: uv sync --locked --all-extras
+      - run: uv run --no-sync pytest --cov=agent_framework_community_postgres --cov-branch --cov-report=term-missing --cov-fail-under=85
+
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         postgres: ["16", "17"]
         maf: ["pinned", "latest"]
         exclude:
@@ -50,6 +115,8 @@ jobs:
       POSTGRES_TEST_CONNECTION_STRING: postgresql://postgres:postgres@127.0.0.1:5433/agent_framework
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: ${{ matrix.python }}
@@ -57,7 +124,7 @@ jobs:
       # Latest: re-resolve the two MAF packages to the newest release the
       # declared ranges allow, then sync that lock into the same .venv the
       # test step runs in. `uv run` below keeps the upgraded lock. The ranges
-      # are the supported range, so this leg blocks a merge.
+      # are the supported range, so the release procedure requires this leg to pass.
       - if: matrix.maf == 'latest'
         run: |
           uv lock --upgrade-package agent-framework-core --upgrade-package agent-framework-ag-ui

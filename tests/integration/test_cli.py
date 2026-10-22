@@ -4,6 +4,7 @@ from uuid import uuid4
 
 import pytest
 from psycopg import Connection, sql
+from psycopg.conninfo import make_conninfo
 
 from agent_framework_community_postgres._cli import main
 
@@ -61,7 +62,7 @@ def test_purge_reports_counts(test_dsn: str, schema: str, capsys: pytest.Capture
 def test_wrong_password_is_a_one_line_error(
     capsys: pytest.CaptureFixture[str], test_dsn: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", "postgresql://postgres:SECRETPW@127.0.0.1:5433/agent_framework")
+    monkeypatch.setenv("POSTGRES_CONNECTION_STRING", make_conninfo(test_dsn, password="SECRETPW"))
     started = time.monotonic()
     code = main(["status"])
     captured = capsys.readouterr()

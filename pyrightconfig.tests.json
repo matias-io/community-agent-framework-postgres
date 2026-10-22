@@ -1,0 +1,10 @@
+{
+  "include": ["tests", "samples"],
+  "typeCheckingMode": "basic",
+  "reportMissingModuleSource": false,
+  "reportMissingTypeStubs": false,
+  "reportPrivateImportUsage": false,
+  "reportPrivateUsage": false,
+  "reportTypedDictNotRequiredAccess": false,
+  "reportInvalidTypeVarUse": false
+}

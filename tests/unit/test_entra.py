@@ -5,7 +5,7 @@ import logging
 import threading
 import time
 from importlib.metadata import requires
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from agent_framework import SecretString
@@ -42,18 +42,20 @@ class _Token:
         self.expires_on = 4_102_444_800
 
 
-class SyncCredential:
+class _Recording:
     def __init__(self, token: str = TOKEN_SECRET) -> None:
         self.value = token
         self.scopes: list[tuple[str, ...]] = []
 
+
+class SyncCredential(_Recording):
     def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
         self.scopes.append(scopes)
         return _Token(self.value)
 
 
-class AsyncCredential(SyncCredential):
-    async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:  # type: ignore[override]
+class AsyncCredential(_Recording):
+    async def get_token(self, *scopes: str, **kwargs: Any) -> _Token:
         self.scopes.append(scopes)
         return _Token(self.value)
 
@@ -65,6 +67,8 @@ class FailingCredential:
 
 @pytest.fixture
 def captured(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    # Hosted Windows runners set PGUSER; each test chooses its own user source.
+    monkeypatch.delenv("PGUSER", raising=False)
     calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_connect(cls: type[AsyncConnection[Any]], conninfo: str = "", **kwargs: Any) -> str:
@@ -219,7 +223,7 @@ async def test_custom_credential_error_text_stays_out_of_messages_and_logs(
     assert "RuntimeError: see the chained cause" in str(info.value)
     assert made_up_secret not in str(info.value)
     assert made_up_secret not in caplog.text
-    assert made_up_secret not in (connection_class.entra_last_error or "")
+    assert made_up_secret not in (getattr(connection_class, "entra_last_error", None) or "")
     assert info.value.__cause__ is not None and made_up_secret in str(info.value.__cause__)
     pool = AsyncConnectionPool("host=db user=app", open=False, connection_class=connection_class)
     try:
@@ -342,7 +346,7 @@ async def test_an_empty_token_is_refused(captured: list[tuple[str, dict[str, Any
 
 def test_a_credential_needs_get_token() -> None:
     with pytest.raises(TypeError, match="get_token"):
-        entra_connection_class(object())  # type: ignore[arg-type]
+        entra_connection_class(cast(Any, object()))
 
 
 async def test_the_owned_pool_uses_the_entra_connection_class() -> None:
@@ -389,8 +393,8 @@ async def test_the_hub_shares_its_signed_in_pool() -> None:
         assert isinstance(hub.pool, AsyncConnectionPool)
         assert hub.pool.connection_class is not AsyncConnection
         assert hub.history_provider()._client.client is hub.pool  # pyright: ignore[reportPrivateUsage]
-        with pytest.raises(TypeError, match="credential is set by the hub"):
-            hub.session_store(credential=SyncCredential())
+        with pytest.raises(TypeError, match="unexpected keyword argument 'credential'"):
+            cast(Any, hub).session_store(credential=SyncCredential())
     finally:
         await hub.close()
 

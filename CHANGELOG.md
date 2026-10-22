@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-10-22
+
+No public name, schema or migration changes. Upgrading needs no `migrate()` run.
+
+### Added
+
+- Tested on `agent-framework-core` 1.22 and 1.23, and `agent-framework-ag-ui` 1.6 and 1.7, so those versions no longer log the untested-version warning. The full suite was run on each, and CI's latest leg runs the newest release on every change.
+- Python 3.15 support. The full suite passed on stable 3.15.1 locally, and the CI matrix runs the 3.15 release. psycopg's binary wheel ships for 3.15.
+- As of October 22, 2026, PyYAML, which `agent-framework-core` requires, and frozenlist, used by the `azure` extra through aiohttp, have no Python 3.15 wheels. PyYAML builds from source; frozenlist needs a C compiler with its default build settings. httptools 0.9.0 now provides 3.15 wheels.
+- `samples/resume_after_restart.py`: a workflow killed after its first step finishes from its checkpoint in a new process. A test runs it, and every other sample that needs only PostgreSQL.
+- `docs/connections.md`, which takes over the connection reference from the README and adds pool sizing.
+- A warning when a store or hub with a credential uses `sslmode=require` or `verify-ca`, which encrypt without fully verifying the server.
+
+### Changed
+
+- The README leads with what the package implements and how it compares with Microsoft's `agent-framework-postgres`, and links to the guides for detail.
+- The hub's factories list their parameters instead of taking `**kwargs`, so editors and type checkers see them. Passing a hub-owned argument still raises `TypeError`, now Python's own "unexpected keyword argument". `connection_string`, `env_file_path` and `env_file_encoding`, which a factory always refused, now raise that `TypeError` instead of `ValueError`. Leaving out `retention` still means the hub's policy, and `retention=None` still means no expiry.
+- `PostgresHistoryProvider.list_sessions` reads one index entry per session instead of every message on the page.
+- A history save with `max_messages` set trims with one index walk of the kept messages, and deletes nothing while the session is within the limit, instead of an anti-join over the whole session.
+- Leases use the current database clock. Acquisition starts its TTL after any row-lock wait; renewal locks before checking expiry, so a lease that expires during the wait raises `LeaseLost`. Calls inside a caller's transaction still become visible only at its commit.
+
+### Fixed
+
+- A history purge could split a session. It deleted expired messages in 1000-row batches without the session's save lock, so a save landing between or during batches could leave a session with a tool call but not its result. The purge now works a session at a time: it takes each session's save lock, skips a session another writer holds, and deletes the session only if none of its messages is live, checked after the lock. On the benchmark in `docs/retention.md` a full purge took about 2.0 s, against 1.5 to 1.8 s before. A purge round locks at most 64 sessions, so outside a caller's own transaction it never holds more than a connection's share of the server's lock table.
+- On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
+- An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
+- `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
+- `max_messages` accepted `inf` and `nan`, which then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for those and for a fraction such as `2.5`. Whole floats and integer-like values are stored as an `int`. Booleans retain their integer meaning, so `False` still disables writes as it did in 0.1.1.
+
+### Security and CI
+
+- Ruff runs Microsoft agent-framework's rule set, less its Microsoft copyright-notice rule, and pyright treats a stale ignore comment or cast as an error, as Microsoft's does.
+- CI type-checks tests and samples with mypy, zuban, pyrefly, ty and pyright in Microsoft's relaxed profile, type-checks the documentation's code blocks, runs the unit tests on Windows, and fails below 85% coverage. Coverage is 98%.
+- The locked development environment moves to pydantic 2.14.1, pydantic-core 2.50.1 and aiohttp 3.14.5, which ship Python 3.15 wheels, and adds the type checkers, pytest-cov and twine. The two MAF packages stay at their tested floor.
+- `docker-compose.yml` publishes the development database on `127.0.0.1` only.
+- Workflows check out without persisted credentials. The release job builds without a cache and refuses a tag whose commit is not on `main`. A separate job checks a downloaded copy of the built wheel and source archive with the locked twine and an import, so nothing a check installs can change what is published.
+- Dependabot also proposes updates to the locked development dependencies, except the two MAF packages.
+- In CI, a missing `POSTGRES_TEST_CONNECTION_STRING` fails the run instead of skipping the database tests.
+
 ## [0.1.1] - 2026-10-11
 
 The first release on PyPI.
@@ -68,5 +107,6 @@ Never published to PyPI. It declared `agent-framework-core>=1.19.0,<2`.
 - A CLI, `python -m agent_framework_community_postgres`, with `migrate`, `migrate --print`, `status` and `purge [--mode tombstone|delete] --application-id ID`.
 - Stores created by a hub refuse to run after the hub closes.
 
+[0.1.2]: https://github.com/matias-io/community-agent-framework-postgres/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/matias-io/community-agent-framework-postgres/compare/50c91c5...v0.1.1
 [0.1.0]: https://github.com/matias-io/community-agent-framework-postgres/tree/50c91c5

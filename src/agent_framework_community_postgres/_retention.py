@@ -79,7 +79,7 @@ class _ReadOnlyCounts(Mapping[str, int]):
             return self._data == dict(cast("Mapping[object, object]", other))
         return NotImplemented
 
-    __hash__ = None  # type: ignore[assignment]  # equal to a dict, so unhashable like one
+    __hash__ = None  # equal to a dict, so unhashable like one
 
     def __reduce__(self) -> tuple[type[_ReadOnlyCounts], tuple[dict[str, int]]]:
         return (_ReadOnlyCounts, (dict(self._data),))
@@ -136,22 +136,24 @@ async def purge_rows(
         raise ValueError("batch_size must be at least 1.")
     if mode == "tombstone" and tombstone is not None:
         candidates = sql.SQL(
-            "SELECT c.ctid FROM {table} c WHERE ({where}) AND c.expires_at < now() AND c.purged_at IS NULL"
+            "SELECT c.ctid FROM {target} c WHERE ({predicate}) AND c.expires_at < now() AND c.purged_at IS NULL"
             " LIMIT %(batch)s FOR UPDATE SKIP LOCKED"
         )
-        statement = sql.SQL("UPDATE {table} SET {tombstone}, purged_at = now() WHERE ctid IN ({candidates})")
+        statement = sql.SQL("UPDATE {target} SET {cleared}, purged_at = now() WHERE ctid IN ({rows})")
     else:
         candidates = sql.SQL(
-            "SELECT c.ctid FROM {table} c WHERE ({where}) AND c.expires_at < now()"
+            "SELECT c.ctid FROM {target} c WHERE ({predicate}) AND c.expires_at < now()"
             " LIMIT %(batch)s FOR UPDATE SKIP LOCKED"
         )
-        statement = sql.SQL("DELETE FROM {table} WHERE ctid IN ({candidates})")
+        statement = sql.SQL("DELETE FROM {target} WHERE ctid IN ({rows})")
     composed = statement.format(
-        table=table, tombstone=tombstone or sql.SQL(""), candidates=candidates.format(table=table, where=where)
+        target=table, cleared=tombstone or sql.SQL(""), rows=candidates.format(target=table, predicate=where)
     )
     total = 0
     while True:
-        async with client.connection() as connection:
+        # READ COMMITTED: under a REPEATABLE READ default, SKIP LOCKED on a row changed after the snapshot
+        # would raise a serialization failure instead of skipping it.
+        async with client.connection(read_committed=True) as connection:
             cursor = await connection.execute(composed, dict(params) | {"batch": batch_size})
             count = cursor.rowcount
         total += count

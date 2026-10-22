@@ -12,7 +12,7 @@ A lease serializes work on one resource across replicas. MAF hosting serializes 
 PostgresLeases(*, application_id, ...)
 ```
 
-`application_id` is required. The connection arguments are the same on every store. See [Standalone use](../README.md#standalone-use). On the hub, call `hub.leases()`.
+`application_id` is required. The connection arguments are the same on every store. See [connections.md](connections.md). On the hub, call `hub.leases()`.
 
 ## Acquiring
 
@@ -25,11 +25,11 @@ After a block that raised or was cancelled, the release waits at most 5 seconds.
 - The database clock decides expiry, so clock drift between processes does not matter.
 - A lease has one holder per acquisition. While it is held, every other acquisition waits or fails, including one with the same `owner`. `owner` is a label for diagnostics, and `renew` and `release` match the acquisition's own `token`.
 - A holder that crashed without releasing is recovered by expiry: once its `ttl` has passed, the next acquisition takes the lease.
-- With `wait=0`, a lease that is held raises `LeaseUnavailable` at once. With a longer `wait`, `acquire` retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds.
+- `wait` bounds retries after an acquisition returns unavailable. With `wait=0`, that result raises `LeaseUnavailable`; a longer `wait` enables retries with a delay that starts at 0.1 seconds and doubles up to 2 seconds. The setting does not bound database connection or row-lock waits. Set database timeouts separately when needed.
 - `lease.renew()` extends the lease by `ttl` from now. It raises `LeaseLost` if the lease expired or another acquisition took it.
 - Releasing a lease you no longer hold does nothing.
-- Leases use plain rows, not advisory locks, so they never hold a connection during your work. Behind a transaction-mode pooler such as PgBouncer, pass a pool with `prepare_threshold=None`. See [Standalone use](../README.md#standalone-use).
-- Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Inside a transaction you opened yourself, `now()` does not advance and leases never expire.
+- Leases use plain rows, not advisory locks, so they never hold a connection during your work. Behind a transaction-mode pooler such as PgBouncer, pass a pool with `prepare_threshold=None`. See [connections.md](connections.md).
+- Pass a pool or an autocommit connection. A single connection runs one call at a time, so a server should pass a pool. Acquisition starts its TTL after reserving the row, including any row-lock wait. Renewal locks the row first, then checks expiry and extends it using the current database clock. A lease that expires while renewal waits raises `LeaseLost`. Other connections see the change only when your transaction commits.
 
 `LeaseUnavailable` and `LeaseLost` carry the resource name as `resource` and never put it in the message, because a resource name often contains a user or visitor id.
 

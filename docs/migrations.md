@@ -44,7 +44,7 @@ report = await hub.migrate(lock_timeout=timedelta(seconds=5))
 
 ## Concurrency
 
-`migrate()` is safe to call from every replica at startup. Each step takes `pg_advisory_xact_lock` on a key derived from the schema and prefix, so two processes never migrate the same tables at once. Each version runs in its own transaction and is skipped when another process recorded it while this one waited. The lock is transaction scoped, so it is released when the transaction ends, and a transaction-mode pooler keeps it on one server connection. Behind PgBouncer in transaction mode, pass a pool with `prepare_threshold=None`. See [Standalone use](../README.md#standalone-use).
+`migrate()` is safe to call from every replica at startup. Each step takes `pg_advisory_xact_lock` on a key derived from the schema and prefix, so two processes never migrate the same tables at once. Each version runs in its own transaction and is skipped when another process recorded it while this one waited. The lock is transaction scoped, so it is released when the transaction ends, and a transaction-mode pooler keeps it on one server connection. Behind PgBouncer in transaction mode, pass a pool with `prepare_threshold=None`. See [connections.md](connections.md).
 
 SQL applied by hand does not take this lock. Do not run it while an application instance may be calling `migrate()` on the same schema.
 
@@ -119,6 +119,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE
   TO app_runtime;
 GRANT SELECT ON agents.af_migrations TO app_runtime;
 ```
+
+`application_id` separates applications that share these tables, but only as a filter in each query; it is not access control. A role with these grants can read and change every application's rows. Applications that must not see each other's history or sessions need their own schema and their own runtime role.
 
 ## Retention
 

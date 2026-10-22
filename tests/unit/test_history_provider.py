@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 from agent_framework import Message
 from psycopg_pool import AsyncConnectionPool
@@ -16,10 +18,26 @@ def test_defaults_match_the_redis_provider_shape() -> None:
     assert provider.tenant_id == "" and provider.agent_id == ""
 
 
-@pytest.mark.parametrize("kwargs", [{"tenant_id": ""}, {"agent_id": ""}, {"max_messages": -1}])
-def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, object]) -> None:
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"tenant_id": ""},
+        {"agent_id": ""},
+        {"max_messages": -1},
+        {"max_messages": float("inf")},
+        {"max_messages": float("nan")},
+        {"max_messages": 2.5},
+    ],
+)
+def test_rejects_empty_scopes_and_negative_limits(kwargs: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
-        PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)  # type: ignore[arg-type]
+        PostgresHistoryProvider(application_id="app", client=_pool(), **kwargs)
+
+
+@pytest.mark.parametrize(("given", "stored"), [(None, None), (0, 0), (3, 3), (2.0, 2), (False, 0), (True, 1)])
+def test_accepts_the_limits_0_1_1_accepted(given: Any, stored: int | None) -> None:
+    provider = PostgresHistoryProvider(application_id="app", client=_pool(), max_messages=given)
+    assert provider.max_messages == stored and (stored is None or type(provider.max_messages) is int)
 
 
 async def test_none_session_id_is_an_error() -> None:
@@ -42,4 +60,9 @@ async def test_empty_or_missing_session_id_is_rejected_everywhere(session_id: st
 async def test_non_string_session_id_is_rejected() -> None:
     provider = PostgresHistoryProvider(application_id="app", client=_pool())
     with pytest.raises(ValueError):
-        await provider.get_messages(5)  # type: ignore[arg-type]
+        await provider.get_messages(cast(Any, 5))
+
+
+async def test_false_message_limit_still_disables_writes_without_a_connection() -> None:
+    provider = PostgresHistoryProvider(application_id="app", client=_pool(), max_messages=False)
+    await provider.save_messages("session", [Message(role="user", contents=["not stored"])])

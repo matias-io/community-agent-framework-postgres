@@ -29,9 +29,12 @@ class PostgresCheckpointStorage(BaseStore):
     encode them, so the same restricted deserializer and ``allowed_checkpoint_types`` apply, and
     the same warning: the table is a trust boundary, because non-JSON values are pickled. Rows are
     keyed by application, optional ``tenant_id`` and ``scope`` (a conversation or response id, the
-    way Foundry hosting scopes its stores) and the checkpoint id. "Latest" is the last row written
-    in a scope, whatever clock produced it. Saving an existing id replaces its content and keeps
-    its position, as the framework's own stores do.
+    way Foundry hosting scopes its stores) and the checkpoint id. Here ``scope`` names one run; the
+    AG-UI snapshot store's ``scope`` is an authorization boundary instead. "Latest" is the last row
+    written in a scope, whatever clock produced it: saves in one scope take turns on a lock, so
+    parallel runs should each have their own scope. Saving an existing id replaces its content, as
+    ``FileCheckpointStorage`` and ``CosmosCheckpointStorage`` do, and keeps its place in write order;
+    those two order by ``timestamp`` instead.
     """
 
     PAYLOAD_FORMAT: ClassVar[str] = "agent-framework.python.checkpoint.v1"
@@ -68,16 +71,14 @@ class PostgresCheckpointStorage(BaseStore):
         self.tenant_id = optional_text(tenant_id, "tenant_id")
         self.scope = optional_text(scope, "scope")
         self._allowed_types: frozenset[str] = frozenset(allowed_checkpoint_types or [])
-        self._lock_key = json.dumps(
-            [
-                "agent-framework-postgres:checkpoints",
-                schema,
-                table_prefix,
-                self.application_id,
-                self.tenant_id,
-                self.scope,
-            ]
-        )
+        self._lock_key = json.dumps([
+            "agent-framework-postgres:checkpoints",
+            schema,
+            table_prefix,
+            self.application_id,
+            self.tenant_id,
+            self.scope,
+        ])
 
     _SCOPE = sql.SQL(
         "application_id = %(app)s AND tenant_id = %(tenant)s AND scope = %(scope)s AND payload_format = %(format)s"
@@ -120,7 +121,7 @@ class PostgresCheckpointStorage(BaseStore):
                 "A checkpoint cannot be encoded or restored under this storage's allowed types."
             ) from exc
         payload = encode_jsonb(encoded, what="Checkpoint")
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             # Writers of one scope take turns, so sequence order is commit order.
             await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (self._lock_key,))
             await connection.execute(
@@ -196,7 +197,7 @@ class PostgresCheckpointStorage(BaseStore):
 
     async def delete(self, checkpoint_id: str) -> bool:
         """Delete by id within this store's scope; ``True`` when a row existed."""
-        async with self._client.connection() as connection:
+        async with self._client.connection(read_committed=True) as connection:
             cursor = await connection.execute(
                 sql.SQL("DELETE FROM {checkpoints} WHERE {scope} AND checkpoint_id = %(id)s").format(
                     checkpoints=self._names.table("checkpoints"), scope=self._SCOPE
