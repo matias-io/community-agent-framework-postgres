@@ -3,8 +3,10 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from typing import Any
 
 import pytest
+from psycopg import AsyncConnection, sql
 
 from agent_framework_community_postgres import PostgresPersistence, _leases
 from agent_framework_community_postgres._client import (
@@ -267,3 +269,90 @@ async def test_a_failing_release_logs_only_through_the_package_logger(
     package = [r for r in caplog.records if r.name == _leases.__name__ and r.levelno == logging.WARNING]
     assert len(package) == warnings
     assert sum("Could not release" in r.getMessage() for r in package) == 1
+
+
+async def _wait_for_row_lock(monitor: AsyncConnection[Any], blocker_pid: int) -> None:
+    async def wait() -> None:
+        while True:
+            cursor = await monitor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid)))",
+                (blocker_pid,),
+            )
+            row = await cursor.fetchone()
+            if row is not None and row[0]:
+                return
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait(), 5)
+
+
+@pytest.mark.parametrize("delete_row", [False, True], ids=["conflict-update", "conflict-deleted"])
+async def test_acquisition_ttl_starts_after_a_row_lock_wait(
+    persistence: PostgresPersistence, test_dsn: str, expire: Callable[[str], Awaitable[None]], delete_row: bool
+) -> None:
+    leases = persistence.leases()
+    ttl = timedelta(seconds=1)
+    assert await leases.try_acquire("blocked", owner="old", ttl=ttl) is not None
+    await expire("leases")
+    table = persistence.names.table("leases")
+    async with (
+        await AsyncConnection.connect(test_dsn) as blocker,
+        await AsyncConnection.connect(test_dsn, autocommit=True) as monitor,
+    ):
+        cursor = await blocker.execute("SELECT pg_backend_pid()")
+        row = await cursor.fetchone()
+        assert row is not None
+        if delete_row:
+            await blocker.execute(sql.SQL("DELETE FROM {} WHERE resource = 'blocked'").format(table))
+        else:
+            await blocker.execute(sql.SQL("SELECT 1 FROM {} WHERE resource = 'blocked' FOR UPDATE").format(table))
+        task = asyncio.create_task(leases.try_acquire("blocked", owner="new", ttl=ttl))
+        try:
+            await _wait_for_row_lock(monitor, row[0])
+            await monitor.execute("SELECT pg_sleep(1.2)")
+            cursor = await monitor.execute("SELECT clock_timestamp()")
+            released_at = await cursor.fetchone()
+            assert released_at is not None
+            await blocker.commit()
+            assert await task is not None
+            cursor = await monitor.execute(
+                sql.SQL("SELECT expires_at FROM {} WHERE resource = 'blocked'").format(table)
+            )
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] >= released_at[0] + ttl
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_renewal_refuses_a_lease_that_expired_during_a_row_lock_wait(
+    persistence: PostgresPersistence, test_dsn: str
+) -> None:
+    leases = persistence.leases()
+    lease = await leases.try_acquire("blocked", owner="one", ttl=timedelta(seconds=5))
+    assert lease is not None
+    table = persistence.names.table("leases")
+    async with (
+        await AsyncConnection.connect(test_dsn) as blocker,
+        await AsyncConnection.connect(test_dsn, autocommit=True) as monitor,
+    ):
+        cursor = await blocker.execute("SELECT pg_backend_pid()")
+        row = await cursor.fetchone()
+        assert row is not None
+        await blocker.execute(sql.SQL("SELECT 1 FROM {} WHERE resource = 'blocked' FOR UPDATE").format(table))
+        task = asyncio.create_task(lease.renew())
+        try:
+            await _wait_for_row_lock(monitor, row[0])
+            await monitor.execute(
+                sql.SQL(
+                    "SELECT pg_sleep(greatest(0, extract(epoch FROM expires_at - clock_timestamp())) + 0.1)"
+                    " FROM {} WHERE resource = 'blocked'"
+                ).format(table)
+            )
+            await blocker.rollback()
+            with pytest.raises(LeaseLost):
+                await task
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

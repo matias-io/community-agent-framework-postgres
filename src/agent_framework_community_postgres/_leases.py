@@ -66,9 +66,9 @@ class Lease:
 class PostgresLeases(BaseStore):
     """Leases keyed by ``(application_id, resource)``, judged by the database clock.
 
-    Acquisition is one upsert that succeeds only when the row is absent or expired, so
-    there is one holder per acquisition, whatever ``owner`` says; a holder that crashed
-    is recovered when its lease expires. No advisory locks are used, so a connection is
+    Acquisition reserves an absent or expired row, then starts its TTL after any row-lock
+    wait. There is one holder per acquisition, whatever ``owner`` says; a holder that
+    crashed is recovered when its lease expires. No advisory locks are used, so a connection is
     never pinned while the caller does slow work.
     """
 
@@ -109,15 +109,26 @@ class PostgresLeases(BaseStore):
             cursor = await connection.execute(
                 sql.SQL(
                     "INSERT INTO {leases} (application_id, resource, owner, token, expires_at)"
-                    " VALUES (%(app)s, %(resource)s, %(owner)s, %(token)s, statement_timestamp() + %(ttl)s)"
+                    " VALUES (%(app)s, %(resource)s, %(owner)s, %(token)s, clock_timestamp() + %(ttl)s)"
                     " ON CONFLICT (application_id, resource) DO UPDATE"
                     " SET owner = EXCLUDED.owner, token = EXCLUDED.token, expires_at = EXCLUDED.expires_at"
-                    " WHERE {leases}.expires_at < statement_timestamp()"
+                    " WHERE {leases}.expires_at < clock_timestamp()"
                     " RETURNING token"
                 ).format(leases=self._names.table("leases")),
                 {"app": self.application_id, "resource": resource, "owner": owner, "token": token, "ttl": ttl},
             )
             row = await cursor.fetchone()
+            if row is not None:
+                # An insert can wait on an uncommitted conflicting row that is then deleted. In that case
+                # ON CONFLICT's update never runs, and VALUES was evaluated before the wait. Start the TTL
+                # after the reservation, while its row lock is still held, for both insert and update paths.
+                await connection.execute(
+                    sql.SQL(
+                        "UPDATE {leases} SET expires_at = clock_timestamp() + %(ttl)s"
+                        " WHERE application_id = %(app)s AND resource = %(resource)s AND token = %(token)s"
+                    ).format(leases=self._names.table("leases")),
+                    {"app": self.application_id, "resource": resource, "token": token, "ttl": ttl},
+                )
         return Lease(self, resource, owner, ttl, token) if row is not None else None
 
     @asynccontextmanager
@@ -173,11 +184,21 @@ class PostgresLeases(BaseStore):
 
     async def _renew(self, lease: Lease) -> None:
         async with self._client.connection(read_committed=True) as connection:
+            # UPDATE can evaluate its expiry predicate before waiting on an unchanged locked row. Lock
+            # first, then check the current clock in a separate statement, so an expired lease stays lost.
+            await connection.execute(
+                sql.SQL(
+                    "SELECT 1 FROM {leases}"
+                    " WHERE application_id = %(app)s AND resource = %(resource)s AND owner = %(owner)s"
+                    " AND token = %(token)s FOR UPDATE"
+                ).format(leases=self._names.table("leases")),
+                self._lease_params(lease),
+            )
             cursor = await connection.execute(
                 sql.SQL(
-                    "UPDATE {leases} SET expires_at = statement_timestamp() + %(ttl)s"
+                    "UPDATE {leases} SET expires_at = clock_timestamp() + %(ttl)s"
                     " WHERE application_id = %(app)s AND resource = %(resource)s AND owner = %(owner)s"
-                    " AND token = %(token)s AND expires_at >= statement_timestamp() RETURNING owner"
+                    " AND token = %(token)s AND expires_at >= clock_timestamp() RETURNING owner"
                 ).format(leases=self._names.table("leases")),
                 self._lease_params(lease) | {"ttl": lease.ttl},
             )
