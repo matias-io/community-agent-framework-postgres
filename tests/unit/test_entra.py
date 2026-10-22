@@ -67,6 +67,8 @@ class FailingCredential:
 
 @pytest.fixture
 def captured(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str, Any]]]:
+    # Hosted Windows runners set PGUSER; each test chooses its own user source.
+    monkeypatch.delenv("PGUSER", raising=False)
     calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_connect(cls: type[AsyncConnection[Any]], conninfo: str = "", **kwargs: Any) -> str:
