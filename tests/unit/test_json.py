@@ -87,7 +87,7 @@ def _writes(hub: PostgresPersistence, bad: object) -> list[Callable[[], Awaitabl
     return [
         lambda: hub.session_store().set("s", session),
         lambda: (
-            hub.history_provider().save_messages("s", [Message(role="user", contents=[str(bad)])])
+            hub.history_provider().save_messages("s", [Message(role="user", contents=[bad])])
             if isinstance(bad, str)
             else hub.history_provider().save_messages(
                 "s", [Message(role="user", contents=["x"], additional_properties={"bad": bad})]

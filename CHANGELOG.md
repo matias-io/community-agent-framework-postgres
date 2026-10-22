@@ -4,15 +4,15 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - 2026-10-19
+## [0.1.2] - 2026-10-22
 
 No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 
 ### Added
 
-- Tested on `agent-framework-core` 1.22 and `agent-framework-ag-ui` 1.6, so those versions no longer log the untested-version warning. The full suite was run on each, and CI's latest leg runs the newest release on every change.
-- Python 3.15 support. The full suite passed on 3.15.0b4 locally, and the CI matrix runs the 3.15 release. psycopg's binary wheel ships for 3.15.
-- On Python 3.15, some dependencies of MAF and of the extras have no wheels yet: PyYAML, which `agent-framework-core` requires, builds from source, and httptools (the `ag-ui` extra, through uvicorn) and frozenlist (the `azure` extra, through aiohttp) need a C compiler.
+- Tested on `agent-framework-core` 1.22 and 1.23, and `agent-framework-ag-ui` 1.6 and 1.7, so those versions no longer log the untested-version warning. The full suite was run on each, and CI's latest leg runs the newest release on every change.
+- Python 3.15 support. The full suite passed on stable 3.15.1 locally, and the CI matrix runs the 3.15 release. psycopg's binary wheel ships for 3.15.
+- As of October 22, 2026, PyYAML, which `agent-framework-core` requires, and frozenlist, used by the `azure` extra through aiohttp, have no Python 3.15 wheels. PyYAML builds from source; frozenlist needs a C compiler with its default build settings. httptools 0.9.0 now provides 3.15 wheels.
 - `samples/resume_after_restart.py`: a workflow killed after its first step finishes from its checkpoint in a new process. A test runs it, and every other sample that needs only PostgreSQL.
 - `docs/connections.md`, which takes over the connection reference from the README and adds pool sizing.
 - A warning when a store or hub with a credential uses `sslmode=require` or `verify-ca`, which encrypt without fully verifying the server.
@@ -23,7 +23,7 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 - The hub's factories list their parameters instead of taking `**kwargs`, so editors and type checkers see them. Passing a hub-owned argument still raises `TypeError`, now Python's own "unexpected keyword argument". `connection_string`, `env_file_path` and `env_file_encoding`, which a factory always refused, now raise that `TypeError` instead of `ValueError`. Leaving out `retention` still means the hub's policy, and `retention=None` still means no expiry.
 - `PostgresHistoryProvider.list_sessions` reads one index entry per session instead of every message on the page.
 - A history save with `max_messages` set trims with one index walk of the kept messages, and deletes nothing while the session is within the limit, instead of an anti-join over the whole session.
-- Lease statements read the clock when each statement starts, so a `renew` inside the caller's own transaction extends the lease from the current time.
+- Leases use the current database clock. Acquisition starts its TTL after any row-lock wait; renewal locks before checking expiry, so a lease that expires during the wait raises `LeaseLost`. Calls inside a caller's transaction still become visible only at its commit.
 
 ### Fixed
 
@@ -31,7 +31,7 @@ No public name, schema or migration changes. Upgrading needs no `migrate()` run.
 - On a server whose default isolation level is `REPEATABLE READ`, concurrent writes to one session or AG-UI snapshot, and a re-save of one checkpoint by two writers, failed with a serialization error. These writes, and purges, now run at `READ COMMITTED`, as history saves, leases and migrations already did.
 - An error on a borrowed `AsyncConnection` that has closed was marked `retryable`. A retry would reach the same dead connection, so it is no longer retryable.
 - `migrate()` on a connection inside the caller's transaction left its 30-second `lock_timeout` in force until that transaction ended. It now puts back the caller's setting after the DDL.
-- `max_messages` accepted `inf` and `nan`, which then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for those, for a fraction such as `2.5` and for a bool. A whole float such as `2.0` and an int-like such as `numpy.int64` still work, stored as an `int`.
+- `max_messages` accepted `inf` and `nan`, which then failed every save with a database error, so a misconfigured provider stored nothing. The constructor now raises `ValueError` for those and for a fraction such as `2.5`. Whole floats and integer-like values are stored as an `int`. Booleans retain their integer meaning, so `False` still disables writes as it did in 0.1.1.
 
 ### Security and CI
 

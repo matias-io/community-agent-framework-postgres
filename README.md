@@ -23,13 +23,13 @@ Each store scopes its rows the way its closest Microsoft counterpart does. The h
 
 ## How it compares with Microsoft's packages
 
-As of agent-framework-core 1.22 and October 2026:
+As of agent-framework-core 1.23.0 and October 22, 2026:
 
 | You need | Microsoft today | This package |
 |---|---|---|
 | Chat history in PostgreSQL | `VectorStoreHistoryProvider` (experimental) over `PostgresStore` from `agent-framework-postgres`, a pgvector connector, which can also search history by meaning | `PostgresHistoryProvider`: one row per message in insert order, saves to a session serialized across processes, `max_messages` and TTL retention |
 | Workflow checkpoints | Cosmos DB, local files or Foundry hosting. A PostgreSQL store is proposed in [microsoft/agent-framework#8664](https://github.com/microsoft/agent-framework/pull/8664) | `PostgresCheckpointStorage` |
-| `AgentSession` across processes | `FileSessionStore` | `PostgresSessionStore` |
+| `AgentSession` across processes | `FileSessionStore` or Foundry hosting session storage | `PostgresSessionStore` |
 | AG-UI threads across restarts | `InMemoryAGUIThreadSnapshotStore` | `PostgresAGUIThreadSnapshotStore` |
 | Vector search and embeddings | `agent-framework-postgres` | Not provided. Use Microsoft's package next to this one |
 
@@ -50,7 +50,7 @@ On Windows, async psycopg cannot run on the default `ProactorEventLoop`, so the 
 
 ## Quick start
 
-This script runs against the database from `docker-compose.yml`. It needs the `ag-ui` extra.
+This script uses the base package and the database from `docker-compose.yml`. It needs no LLM, embedding service or optional extra.
 
 ```python
 import asyncio
@@ -71,12 +71,13 @@ async def main() -> None:
         print([m.text for m in await history.get_messages("session-1")])
         await hub.session_store().set("session-1", AgentSession(session_id="session-1"))
         print(await hub.checkpoint_storage(scope="session-1").list_checkpoint_ids(workflow_name="demo"))
-        print(await hub.thread_snapshot_store().get(scope="user-1", thread_id="thread-1"))
 
 
 with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop if sys.platform == "win32" else None) as runner:
     runner.run(main())
 ```
+
+For AG-UI thread snapshots, install the `ag-ui` extra and follow [the snapshot guide](https://github.com/matias-io/community-agent-framework-postgres/blob/v0.1.2/docs/thread-snapshots.md).
 
 Every store the hub creates shares its pool, `application_id`, `schema` and `table_prefix`. Its factories take the same arguments as the store classes except those and the other connection arguments, and raise `TypeError` if you pass `application_id`, `client`, `credential`, `pool_kwargs`, `schema`, `table_prefix`, `connection_string`, `env_file_path` or `env_file_encoding`. For another schema or prefix, create a separate hub or a standalone store. `retention` defaults to the hub's policy and can be set per store; `retention=None` gives a store whose rows never expire. `hub.purge()` covers every store created by that hub and needs no policy of its own. After `hub.close()`, every store it created raises `PostgresStorageError`.
 
@@ -230,8 +231,8 @@ Retention is off unless you pass `RetentionPolicy(ttl=...)`. With a TTL, every w
 
 | 0.1.2 | Declared | Tested |
 |---|---|---|
-| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0, 1.21.0, 1.22.0 |
-| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0, 1.5.1, 1.6.0 |
+| `agent-framework-core` | `>=1.20.0,<2` | 1.20.0, 1.21.0, 1.22.0, 1.23.0 |
+| `agent-framework-ag-ui` (`ag-ui` extra) | `>=1.5.0,<2` | 1.5.0, 1.5.1, 1.6.0, 1.7.0 |
 | Python | `>=3.11` | 3.11, 3.12, 3.13, 3.14, 3.15 |
 | PostgreSQL | | 16, 17 |
 | psycopg | `>=3.3.5,<4` | 3.3.6 |
