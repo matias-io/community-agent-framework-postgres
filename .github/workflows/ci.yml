@@ -124,7 +124,7 @@ jobs:
       # Latest: re-resolve the two MAF packages to the newest release the
       # declared ranges allow, then sync that lock into the same .venv the
       # test step runs in. `uv run` below keeps the upgraded lock. The ranges
-      # are the supported range, so this leg blocks a merge.
+      # are the supported range, so the release procedure requires this leg to pass.
       - if: matrix.maf == 'latest'
         run: |
           uv lock --upgrade-package agent-framework-core --upgrade-package agent-framework-ag-ui

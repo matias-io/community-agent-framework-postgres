@@ -292,7 +292,7 @@ async def test_stores_and_the_hub_take_pool_kwargs() -> None:
     await hub.close()
 
 
-@pytest.mark.parametrize(("mode", "unchecked"), [("require", "certificate"), ("verify-ca", "host name")])
+@pytest.mark.parametrize(("mode", "unchecked"), [("require", "host name"), ("verify-ca", "host name")])
 def test_an_unverified_sslmode_with_a_credential_logs_a_warning(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str, unchecked: str
 ) -> None:

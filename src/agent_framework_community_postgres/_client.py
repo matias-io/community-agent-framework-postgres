@@ -53,7 +53,7 @@ _POOL_DEFAULTS: dict[str, Any] = {"min_size": 1, "max_size": 10, "timeout": floa
 # (serialization, deadlock), insufficient resources, operator intervention, lock not available.
 _RETRYABLE_SQLSTATES = ("08", "40", "53", "57P0", "55P03")
 _WEAK_SSLMODES = ("disable", "allow", "prefer")
-# Encrypted, but the server's certificate (require) or host name (verify-ca) goes unchecked.
+# Both encrypt without checking the server's host name; require can still validate a configured root CA.
 _UNVERIFIED_SSLMODES = ("require", "verify-ca")
 # One lock per borrowed connection, shared by every handle over it: a psycopg connection runs one
 # transaction block at a time, so overlapping calls from two tasks would nest out of order.
@@ -170,7 +170,7 @@ def _refuse_weak_sslmode(options: Mapping[str, Any], kwargs: Mapping[str, Any]) 
                 " token can reach an impostor; use verify-full, the default with a credential.",
                 source,
                 value,
-                "certificate" if value == "require" else "host name",
+                "host name",
             )
         return
 
