@@ -90,17 +90,21 @@ async def test_scopes_isolate_history(client: ClientHandle, migrated: TableNames
     assert await other_source.get_messages("s") == []
 
 
-async def test_max_messages_keeps_the_newest(client: ClientHandle, migrated: TableNames) -> None:
+@pytest.mark.parametrize(("limit", "expected"), [(2, ["b", "c"]), (True, ["c"])])
+async def test_max_messages_keeps_the_newest(
+    client: ClientHandle, migrated: TableNames, limit: int, expected: list[str]
+) -> None:
     history = PostgresHistoryProvider(
-        application_id="tests", client=client.client, schema=migrated.schema, max_messages=2
+        application_id="tests", client=client.client, schema=migrated.schema, max_messages=limit
     )
     await history.save_messages("s", [Message(role="user", contents=[t]) for t in ("a", "b", "c")])
-    assert _texts(await history.get_messages("s")) == ["b", "c"]
+    assert _texts(await history.get_messages("s")) == expected
 
 
-async def test_max_messages_zero_stores_nothing(client: ClientHandle, migrated: TableNames) -> None:
+@pytest.mark.parametrize("limit", [0, False])
+async def test_max_messages_zero_stores_nothing(client: ClientHandle, migrated: TableNames, limit: int) -> None:
     history = PostgresHistoryProvider(
-        application_id="tests", client=client.client, schema=migrated.schema, max_messages=0
+        application_id="tests", client=client.client, schema=migrated.schema, max_messages=limit
     )
     await history.save_messages("s", [Message(role="user", contents=["a"])])
     assert await history.get_messages("s") == []

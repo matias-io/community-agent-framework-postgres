@@ -32,16 +32,16 @@ def _session_lock_key(
 def _message_limit(value: object) -> int | None:
     """``max_messages`` as an int, or ``None`` for no limit.
 
-    A whole float such as ``2.0`` and an int-like such as ``numpy.int64`` are accepted, as in 0.1.1. A float such
-    as ``inf`` or ``nan``, a fraction, a negative number or a bool raises ``ValueError``: each passed 0.1.1's
-    check only to fail every later save, or to mean something other than a count.
+    Whole floats and integer-like values are normalized to ``int``. Booleans retain Python's integer
+    meaning, so ``False`` still disables writes as it did in 0.1.1. Infinity, NaN, fractions and negative
+    values raise ``ValueError`` before a later save could fail.
     """
     if value is None:
         return None
     limit: int | None = None
     if isinstance(value, float):
         limit = int(value) if value.is_integer() else None
-    elif not isinstance(value, bool):
+    else:
         try:
             limit = operator.index(value)  # type: ignore[arg-type]
         except TypeError:
